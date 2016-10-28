@@ -140,11 +140,21 @@ static struct CoProcessMessage* Python_DispatchHook(struct CoProcessMessage* obj
 
 		if( result == NULL ) {
 			PyErr_Print();
+			PyGILState_Release(gilState);
+			return NULL;
 		} else {
 			PyObject* new_object_msg_item = PyTuple_GetItem( result, 0 );
+			if( new_object_msg_item == NULL ) {
+				PyGILState_Release(gilState);
+				return NULL;
+			}
 			char* output = PyBytes_AsString(new_object_msg_item);
 
 			PyObject* new_object_msg_length = PyTuple_GetItem( result, 1 );
+			if( new_object_msg_length == NULL ) {
+				PyGILState_Release(gilState);
+				return NULL;
+			}
 			int msg_length = PyLong_AsLong(new_object_msg_length);
 
 			outputObject->p_data = (void*)output;
@@ -160,6 +170,10 @@ static struct CoProcessMessage* Python_DispatchHook(struct CoProcessMessage* obj
 static void Python_DispatchEvent(char* event_json) {
 	gilState = PyGILState_Ensure();
 	PyObject *args = PyTuple_Pack( 1, PyUnicode_FromString(event_json) );
+	if( args == NULL ) {
+		PyGILState_Release(gilState);
+		return;
+	}
 	PyObject *result = PyObject_CallObject( dispatch_event, args );
 	PyGILState_Release(gilState);
 }

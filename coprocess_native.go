@@ -53,6 +53,10 @@ func (c *CoProcessor) Dispatch(object *coprocess.Object) (newObject *coprocess.O
 	var newObjectPtr *C.struct_CoProcessMessage
 	newObjectPtr = (*C.struct_CoProcessMessage)(GlobalDispatcher.Dispatch(unsafe.Pointer(objectPtr)))
 
+	if newObjectPtr == nil {
+		return object, nil
+	}
+
 	var newObjectBytes []byte
 	newObjectBytes = C.GoBytes(newObjectPtr.p_data, newObjectPtr.length)
 
