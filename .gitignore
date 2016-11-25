@@ -1,5 +1,6 @@
 .idea/
 .vagrant/
+temp/
 middleware/e1d21f942ec746ed416ab97fe1bf07e8/
 middleware/e1d21f942ec746ed416ab97fe1bf07e8_IGNORED/
 testapps/
@@ -8,6 +9,7 @@ vendor/github.com/dgrijalva_hotfix/
 utils/release_live.sh
 utils/release_rc.sh
 tyk.conf
+tyk.zeroconf.cluster.conf
 tyk_elasticache.conf
 tyk.compose.rpc.conf
 tyk.compose.local_rpc.conf
@@ -15,6 +17,7 @@ tyk.compose.cluster.conf
 tyk.zeroconf.conf
 tyk.zeroconf2.conf
 tyk.zeroconf3.conf
+tyk.zeroconf4.conf
 tyk.zerobench.conf
 tyk.rpc.conf
 tyk.zerobench.conf
@@ -59,3 +62,4 @@ tyk_elasticache.conf
 coprocess_gen_test.go
 session_state_gen_test.go
 __pycache__
+utils/build_hybrid.sh

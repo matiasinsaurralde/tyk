@@ -177,6 +177,7 @@ func (d *DynamicMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Reques
 		r.ContentLength = int64(len(newRequestData.Request.Body))
 		r.Body = nopCloser{bytes.NewBufferString(newRequestData.Request.Body)}
 	}
+
 	r.URL.Path = newRequestData.Request.URL
 
 	// Delete and set headers

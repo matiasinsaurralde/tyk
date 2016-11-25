@@ -87,8 +87,14 @@ func (l SessionLimiter) ForwardMessage(currentSession *SessionState, key string,
 			// an old bucket an let the cache deal with it
 			bucketKey := key + ":" + currentSession.LastUpdated
 
+			// DRL will always overflow with more servers on low rates
+			thisRate := uint(currentSession.Rate*float64(DRLManager.RequestTokenValue))
+			if thisRate < uint(DRLManager.CurrentTokenValue) {
+				thisRate = uint(DRLManager.CurrentTokenValue)
+			}
+
 			thisUserBucket, cErr := BucketStore.Create(bucketKey,
-				uint(currentSession.Rate*float64(DRLManager.RequestTokenValue)),
+				thisRate,
 				time.Duration(currentSession.Per)*time.Second)
 
 			if cErr != nil {
@@ -106,7 +112,10 @@ func (l SessionLimiter) ForwardMessage(currentSession *SessionState, key string,
 	}
 
 	if enableQ {
-		currentSession.Allowance--
+		if config.LegacyEnableAllowanceCountdown {
+			currentSession.Allowance--	
+		}
+		
 		if l.IsRedisQuotaExceeded(currentSession, key, store) {
 			return false, 2
 		}

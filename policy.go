@@ -2,11 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/Sirupsen/logrus"
-	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	"github.com/Sirupsen/logrus"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type Policy struct {
@@ -100,18 +101,27 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 	newRequest.Header.Add("authorization", secret)
 	newRequest.Header.Add("x-tyk-nodeid", NodeID)
 
+	log.WithFields(logrus.Fields{
+		"prefix": "policy",
+	}).Info("Getting mutex lock")
 	ServiceNonceMutex.Lock()
-	defer ServiceNonceMutex.Unlock()
 	newRequest.Header.Add("x-tyk-nonce", ServiceNonce)
 
+	log.WithFields(logrus.Fields{
+		"prefix": "policy",
+	}).Info("Mutex lock acquired... calling")
 	c := &http.Client{
 		Timeout: 5 * time.Second,
 	}
 
+	log.WithFields(logrus.Fields{
+		"prefix": "policy",
+	}).Info("Calling dashboard service for policy list")
 	response, reqErr := c.Do(newRequest)
 
 	if reqErr != nil {
-		log.Error("Request failed: ", reqErr)
+		log.Error("Policy request failed: ", reqErr)
+		ServiceNonceMutex.Unlock()
 		return policies
 	}
 
@@ -119,7 +129,8 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 	retBody, err := ioutil.ReadAll(response.Body)
 
 	if err != nil {
-		log.Error("Failed to read body: ", err)
+		log.Error("Failed to read policy body: ", err)
+		ServiceNonceMutex.Unlock()
 		return policies
 	}
 
@@ -130,17 +141,29 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 		Nonce   string
 	}
 
+	if response.StatusCode == 403 {
+		log.Error("Policy request login failure, Response was: ", string(retBody))
+		reloadScheduled = false
+		ServiceNonceMutex.Unlock()
+		ReLogin()
+		return policies
+	}
+
 	thisList := NodeResponseOK{}
 
 	decErr := json.Unmarshal(retBody, &thisList)
 	if decErr != nil {
-		log.Error("Failed to decode body: ", decErr)
+		log.Error("Failed to decode policy body: ", decErr, "Returned: ", string(retBody))
+		ServiceNonceMutex.Unlock()
 		return policies
 	}
 
 	ServiceNonce = thisList.Nonce
 	log.Debug("Loading Policies Finished: Nonce Set: ", ServiceNonce)
 
+	log.WithFields(logrus.Fields{
+		"prefix": "policy",
+	}).Info("Processing policy list")
 	for _, p := range thisList.Message {
 		thisID := p.MID.Hex()
 		if allowExplicit {
@@ -165,6 +188,7 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 		}
 	}
 
+	ServiceNonceMutex.Unlock()
 	return policies
 }
 

@@ -4,11 +4,7 @@ import (
 	b64 "encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/Sirupsen/logrus"
-	"github.com/TykTechnologies/tykcommon"
-	"github.com/gorilla/context"
-	"github.com/rubyist/circuitbreaker"
-	"gopkg.in/mgo.v2"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -18,6 +14,12 @@ import (
 	"sync"
 	textTemplate "text/template"
 	"time"
+
+	"github.com/Sirupsen/logrus"
+	"github.com/TykTechnologies/tykcommon"
+	"github.com/gorilla/context"
+	"github.com/rubyist/circuitbreaker"
+	"gopkg.in/mgo.v2"
 )
 
 const (
@@ -360,17 +362,16 @@ func SendHeartBeat(endpoint string, secret string) error {
 		Timeout: 5 * time.Second,
 	}
 	response, reqErr := c.Do(newRequest)
+	defer response.Body.Close()
+	retBody, err := ioutil.ReadAll(response.Body)
 
 	if reqErr != nil {
-		return errors.New("Dashboard is down? Heartbeat is failing.")
+		return fmt.Errorf("Dashboard is down? Heartbeat is failing. (err: %v), response was: %s", reqErr, string(retBody))
 	}
 
 	if response.StatusCode != 200 {
-		return errors.New("Dashboard is down? Heartbeat is failing.")
+		return fmt.Errorf("Dashboard is down? Heartbeat is failing. (code invalid: %v), response was: %s", response.StatusCode, string(retBody))
 	}
-
-	defer response.Body.Close()
-	retBody, err := ioutil.ReadAll(response.Body)
 
 	if err != nil {
 		return err
@@ -414,22 +415,31 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	newRequest.Header.Add("x-tyk-nodeid", NodeID)
 
 	ServiceNonceMutex.Lock()
-	defer ServiceNonceMutex.Unlock()
 	newRequest.Header.Add("x-tyk-nonce", ServiceNonce)
 
 	c := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 120 * time.Second,
 	}
 	response, reqErr := c.Do(newRequest)
 
 	if reqErr != nil {
 		log.Error("Request failed: ", reqErr)
+		ServiceNonceMutex.Unlock()
 		return &APISpecs
 	}
 
 	retBody, bErr := a.readBody(response)
 	if bErr != nil {
 		log.Error("Failed to read body: ", bErr)
+		ServiceNonceMutex.Unlock()
+		return &APISpecs
+	}
+
+	if response.StatusCode == 403 {
+		log.Error("Login failure, Response was: ", string(retBody))
+		reloadScheduled = false
+		ServiceNonceMutex.Unlock()
+		ReLogin()
 		return &APISpecs
 	}
 
@@ -448,12 +458,10 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 
 	decErr := json.Unmarshal(retBody, &thisList)
 	if decErr != nil {
-		log.Error("Failed to decode body: ", decErr)
-		log.Debug("Response was: ", string(retBody))
-		log.Info("--> Retrying in 20s")
-		time.Sleep(time.Second * 20)
-		ReLogin()
-		return a.LoadDefinitionsFromDashboardService(endpoint, secret)
+		log.Error("Failed to decode body: ", decErr, "Response was: ", string(retBody))
+		log.Info("--> Retrying in 5s")
+		ServiceNonceMutex.Unlock()
+		return &APISpecs
 		// return &APISpecs
 	}
 
@@ -461,6 +469,7 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	rawdecErr := json.Unmarshal(retBody, &thisRawList)
 	if rawdecErr != nil {
 		log.Error("Failed to decode body (raw): ", rawdecErr)
+		ServiceNonceMutex.Unlock()
 		return &APISpecs
 	}
 
@@ -507,6 +516,7 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	ServiceNonce = thisList.Nonce
 	log.Debug("Loading APIS Finished: Nonce Set: ", ServiceNonce)
 
+	ServiceNonceMutex.Unlock()
 	return &APISpecs
 }
 

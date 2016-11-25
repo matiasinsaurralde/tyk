@@ -3,10 +3,11 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	"github.com/Sirupsen/logrus"
 )
 
 type NodeResponseOK struct {
@@ -39,6 +40,8 @@ func ReLogin() {
 	DashService.StopBeating()
 	DashService.DeRegister()
 
+	time.Sleep(30 * time.Second)
+
 	err := DashService.Register()
 	if err != nil {
 		log.WithFields(logrus.Fields{
@@ -50,6 +53,10 @@ func ReLogin() {
 		go DashService.StartBeating()
 	}
 
+	log.WithFields(logrus.Fields{
+		"prefix": "main",
+	}).Info("Recovering configurations, reloading...")
+	doReload()
 }
 
 func (h *HTTPDashboardHandler) Init() error {
