@@ -4,7 +4,7 @@ import "net/http"
 
 import (
 	"errors"
-	"github.com/Sirupsen/logrus"
+	"github.com/TykTechnologies/logrus"
 	"github.com/gorilla/context"
 )
 

@@ -11,11 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	textTemplate "text/template"
 	"time"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/TykTechnologies/logrus"
 	"github.com/TykTechnologies/tykcommon"
 	"github.com/gorilla/context"
 	"github.com/rubyist/circuitbreaker"
@@ -149,7 +148,6 @@ type APIDefinitionLoader struct {
 }
 
 // Nonce to use when interacting with the dashboard service
-var ServiceNonceMutex = &sync.Mutex{}
 var ServiceNonce string
 
 // Connect connects to the storage engine - can be null
@@ -270,7 +268,7 @@ func RegisterNodeWithDashboard(endpoint string, secret string) error {
 	newRequest.Header.Add("authorization", secret)
 
 	c := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 20 * time.Second,
 	}
 	response, reqErr := c.Do(newRequest)
 
@@ -323,8 +321,6 @@ func RegisterNodeWithDashboard(endpoint string, secret string) error {
 	}).Info("Node registered")
 
 	// Set the nonce
-	ServiceNonceMutex.Lock()
-	defer ServiceNonceMutex.Unlock()
 	ServiceNonce = thisVal.Nonce
 	log.Debug("Registration Finished: Nonce Set: ", ServiceNonce)
 
@@ -353,13 +349,10 @@ func SendHeartBeat(endpoint string, secret string) error {
 	newRequest.Header.Add("x-tyk-nodeid", NodeID)
 	log.Debug("Sending Heartbeat as: ", NodeID)
 
-	ServiceNonceMutex.Lock()
-	defer ServiceNonceMutex.Unlock()
-
 	newRequest.Header.Add("x-tyk-nonce", ServiceNonce)
 
 	c := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 	}
 	response, reqErr := c.Do(newRequest)
 	defer response.Body.Close()
@@ -414,7 +407,6 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	log.Debug("Using: NodeID: ", NodeID)
 	newRequest.Header.Add("x-tyk-nodeid", NodeID)
 
-	ServiceNonceMutex.Lock()
 	newRequest.Header.Add("x-tyk-nonce", ServiceNonce)
 
 	c := &http.Client{
@@ -424,21 +416,18 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 
 	if reqErr != nil {
 		log.Error("Request failed: ", reqErr)
-		ServiceNonceMutex.Unlock()
 		return &APISpecs
 	}
 
 	retBody, bErr := a.readBody(response)
 	if bErr != nil {
 		log.Error("Failed to read body: ", bErr)
-		ServiceNonceMutex.Unlock()
 		return &APISpecs
 	}
 
 	if response.StatusCode == 403 {
 		log.Error("Login failure, Response was: ", string(retBody))
 		reloadScheduled = false
-		ServiceNonceMutex.Unlock()
 		ReLogin()
 		return &APISpecs
 	}
@@ -460,7 +449,6 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	if decErr != nil {
 		log.Error("Failed to decode body: ", decErr, "Response was: ", string(retBody))
 		log.Info("--> Retrying in 5s")
-		ServiceNonceMutex.Unlock()
 		return &APISpecs
 		// return &APISpecs
 	}
@@ -469,7 +457,6 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	rawdecErr := json.Unmarshal(retBody, &thisRawList)
 	if rawdecErr != nil {
 		log.Error("Failed to decode body (raw): ", rawdecErr)
-		ServiceNonceMutex.Unlock()
 		return &APISpecs
 	}
 
@@ -516,7 +503,6 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromDashboardService(endpoint strin
 	ServiceNonce = thisList.Nonce
 	log.Debug("Loading APIS Finished: Nonce Set: ", ServiceNonce)
 
-	ServiceNonceMutex.Unlock()
 	return &APISpecs
 }
 
@@ -536,7 +522,7 @@ func (a *APIDefinitionLoader) LoadDefinitionsFromRPC(orgId string) *[]*APISpec {
 
 	apiCollection := store.GetApiDefinitions(orgId, tags)
 
-	store.Disconnect()
+	//store.Disconnect()
 
 	if RPC_LoadCount > 0 {
 		SaveRPCDefinitionsBackup(apiCollection)

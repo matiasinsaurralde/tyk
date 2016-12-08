@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Sirupsen/logrus"
-	logrus_syslog "github.com/Sirupsen/logrus/hooks/syslog"
 	"github.com/TykTechnologies/goagain"
+	"github.com/TykTechnologies/logrus"
+	"github.com/TykTechnologies/logrus-logstash-hook"
+	logrus_syslog "github.com/TykTechnologies/logrus/hooks/syslog"
+	"github.com/TykTechnologies/logrus_sentry"
 	"github.com/TykTechnologies/tykcommon"
 	logger "github.com/TykTechnologies/tykcommon-logger"
-	"github.com/bshuster-repo/logrus-logstash-hook"
 	"github.com/docopt/docopt.go"
-	"github.com/evalphobia/logrus_sentry"
 	"github.com/facebookgo/pidfile"
 	"github.com/gorilla/mux"
 	"github.com/justinas/alice"
@@ -983,23 +983,32 @@ func getCmdArguments() map[string]interface{} {
 	return arguments
 }
 
+var KeepaliveRunning bool
+
 func StartRPCKeepaliveWatcher(engine *RPCStorageHandler) {
+	if KeepaliveRunning {
+		return
+	}
+
 	go func() {
 		log.WithFields(logrus.Fields{
 			"prefix": "RPC Conn Mgr",
 		}).Info("[RPC Conn Mgr] Starting keepalive watcher...")
 		for {
+			KeepaliveRunning = true
 			RPCKeepAliveCheck(engine)
 			if engine == nil {
 				log.WithFields(logrus.Fields{
 					"prefix": "RPC Conn Mgr",
 				}).Info("No engine, break")
+				KeepaliveRunning = false
 				break
 			}
 			if engine.Killed == true {
 				log.WithFields(logrus.Fields{
 					"prefix": "RPC Conn Mgr",
 				}).Debug("[RPC Conn Mgr] this connection killed")
+				KeepaliveRunning = false
 				break
 			}
 		}
@@ -1048,10 +1057,8 @@ func onFork() {
 		log.Info("Waiting to de-register")
 		time.Sleep(10 * time.Second)
 
-		ServiceNonceMutex.Lock()
 		os.Setenv("TYK_SERVICE_NONCE", ServiceNonce)
 		os.Setenv("TYK_SERVICE_NODEID", NodeID)
-		ServiceNonceMutex.Unlock()
 	}
 
 	amForked = true
@@ -1352,13 +1359,11 @@ func listen(l net.Listener, err error) {
 
 		} else {
 			NodeID = thisID
-			ServiceNonceMutex.Lock()
 			ServiceNonce = thisNonce
 			log.WithFields(logrus.Fields{
 				"prefix": "main",
 			}).Info("State recovered")
 
-			ServiceNonceMutex.Unlock()
 			os.Setenv("TYK_SERVICE_NONCE", "")
 			os.Setenv("TYK_SERVICE_NODEID", "")
 		}

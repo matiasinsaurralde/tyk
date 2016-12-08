@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/TykTechnologies/logrus"
 	"gopkg.in/mgo.v2/bson"
 )
 
@@ -101,17 +101,13 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 	newRequest.Header.Add("authorization", secret)
 	newRequest.Header.Add("x-tyk-nodeid", NodeID)
 
-	log.WithFields(logrus.Fields{
-		"prefix": "policy",
-	}).Info("Getting mutex lock")
-	ServiceNonceMutex.Lock()
 	newRequest.Header.Add("x-tyk-nonce", ServiceNonce)
 
 	log.WithFields(logrus.Fields{
 		"prefix": "policy",
 	}).Info("Mutex lock acquired... calling")
 	c := &http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 	}
 
 	log.WithFields(logrus.Fields{
@@ -121,7 +117,7 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 
 	if reqErr != nil {
 		log.Error("Policy request failed: ", reqErr)
-		ServiceNonceMutex.Unlock()
+
 		return policies
 	}
 
@@ -130,7 +126,7 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 
 	if err != nil {
 		log.Error("Failed to read policy body: ", err)
-		ServiceNonceMutex.Unlock()
+
 		return policies
 	}
 
@@ -144,7 +140,7 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 	if response.StatusCode == 403 {
 		log.Error("Policy request login failure, Response was: ", string(retBody))
 		reloadScheduled = false
-		ServiceNonceMutex.Unlock()
+
 		ReLogin()
 		return policies
 	}
@@ -154,7 +150,7 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 	decErr := json.Unmarshal(retBody, &thisList)
 	if decErr != nil {
 		log.Error("Failed to decode policy body: ", decErr, "Returned: ", string(retBody))
-		ServiceNonceMutex.Unlock()
+
 		return policies
 	}
 
@@ -188,7 +184,6 @@ func LoadPoliciesFromDashboard(endpoint string, secret string, allowExplicit boo
 		}
 	}
 
-	ServiceNonceMutex.Unlock()
 	return policies
 }
 
@@ -201,7 +196,7 @@ func LoadPoliciesFromRPC(orgId string) map[string]Policy {
 
 	rpcPolicies := store.GetPolicies(orgId)
 
-	store.Disconnect()
+	//store.Disconnect()
 
 	jErr1 := json.Unmarshal([]byte(rpcPolicies), &dbPolicyList)
 

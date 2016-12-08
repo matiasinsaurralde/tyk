@@ -6,7 +6,7 @@
 package main
 
 import (
-	"github.com/Sirupsen/logrus"
+	"github.com/TykTechnologies/logrus"
 	"github.com/gorilla/context"
 	"github.com/mitchellh/mapstructure"
 
