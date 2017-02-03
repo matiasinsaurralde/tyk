@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/TykTechnologies/tykcommon"
+	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/mux"
 )
 
@@ -51,8 +52,8 @@ var apiTestDef = `
 
 `
 
-func makeSampleAPI(t *testing.T) *APISpec {
-	spec := createSpecTest(t, apiTestDef)
+func makeSampleAPI(t *testing.T, def string) *APISpec {
+	spec := createSpecTest(t, def)
 
 	specs := &[]*APISpec{spec}
 	newMuxes := mux.NewRouter()
@@ -85,7 +86,7 @@ func TestHealthCheckEndpoint(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
 
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 
 	req, err := http.NewRequest(method, uri+param.Encode(), nil)
 
@@ -139,7 +140,7 @@ func TestApiHandler(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		param := make(url.Values)
 
-		makeSampleAPI(t)
+		makeSampleAPI(t, apiTestDef)
 
 		req, err := http.NewRequest(method, uri+param.Encode(), strings.NewReader(string(body)))
 
@@ -176,7 +177,7 @@ func TestApiHandlerGetSingle(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
 
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 
 	req, err := http.NewRequest(method, uri+param.Encode(), strings.NewReader(string(body)))
 
@@ -265,7 +266,7 @@ func TestKeyHandlerNewKey(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
 
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	param.Set("api_id", "1")
 	req, err := http.NewRequest(method, uri+param.Encode(), strings.NewReader(string(body)))
 
@@ -298,7 +299,7 @@ func TestKeyHandlerUpdateKey(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	param.Set("api_id", "1")
 	req, err := http.NewRequest(method, uri+param.Encode(), strings.NewReader(string(body)))
 
@@ -324,7 +325,7 @@ func TestKeyHandlerUpdateKey(t *testing.T) {
 }
 
 func TestKeyHandlerGetKey(t *testing.T) {
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	createKey()
 
 	uri := "/tyk/keys/1234"
@@ -355,7 +356,7 @@ func TestKeyHandlerGetKey(t *testing.T) {
 }
 
 func TestKeyHandlerGetKeyNoAPIID(t *testing.T) {
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	createKey()
 
 	uri := "/tyk/keys/1234"
@@ -405,7 +406,7 @@ func TestKeyHandlerDeleteKey(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	param.Set("api_id", "1")
 	req, err := http.NewRequest(method, uri+param.Encode(), nil)
 
@@ -441,7 +442,7 @@ func TestCreateKeyHandlerCreateNewKey(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	param.Set("api_id", "1")
 	req, err := http.NewRequest(method, uri+param.Encode(), strings.NewReader(string(body)))
 
@@ -477,7 +478,7 @@ func TestCreateKeyHandlerCreateNewKeyNoAPIID(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	param := make(url.Values)
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	req, err := http.NewRequest(method, uri+param.Encode(), strings.NewReader(string(body)))
 
 	if err != nil {
@@ -515,7 +516,7 @@ func TestAPIAuthFail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	CheckIsAPIOwner(healthCheckhandler)(recorder, req)
 
 	if recorder.Code == 200 {
@@ -537,7 +538,7 @@ func TestAPIAuthOk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	makeSampleAPI(t)
+	makeSampleAPI(t, apiTestDef)
 	CheckIsAPIOwner(healthCheckhandler)(recorder, req)
 
 	if recorder.Code != 200 {
@@ -563,4 +564,89 @@ func TestGetOAuthClients(t *testing.T) {
 	}
 
 	ApiSpecRegister = nil
+}
+
+func TestResetHandler(t *testing.T) {
+	uri := "/tyk/reload/"
+
+	ApiSpecRegister = make(map[string]*APISpec)
+
+	makeSampleAPI(t, apiTestDef)
+
+	recorder := httptest.NewRecorder()
+	params := make(url.Values)
+
+	req, err := http.NewRequest("GET", uri+params.Encode(), nil)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resetHandler(recorder, req)
+
+	if recorder.Code != 200 {
+		t.Fatal("Hot reload failed, response code was: ", recorder.Code)
+	}
+
+	if len(ApiSpecRegister) == 0 {
+		t.Fatal("Hot reload was triggered but no APIs were found.")
+	}
+}
+
+func TestGroupResetHandler(t *testing.T) {
+	signalChan := make(chan bool)
+	cacheStore := RedisClusterStorageManager{}
+	cacheStore.Connect()
+
+	go func() {
+		cacheStore.StartPubSubHandler(RedisPubSubChannel, func(message redis.Message) {
+			t.Log("message: ", string(message.Data))
+			notif := Notification{}
+			if err := json.Unmarshal(message.Data, &notif); err != nil {
+				t.Fatal("Unmarshalling message body failed, malformed: ", err)
+			}
+			if notif.Command == NoticeGroupReload {
+				t.Log("Sending true")
+				signalChan <- true
+			} else {
+				t.Log("Sending false")
+				signalChan <- false
+			}
+		})
+	}()
+
+	uri := "/tyk/reload/group"
+
+	ApiSpecRegister = make(map[string]*APISpec)
+
+	makeSampleAPI(t, apiTestDef)
+
+	recorder := httptest.NewRecorder()
+	params := make(url.Values)
+
+	req, err := http.NewRequest("GET", uri+params.Encode(), nil)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	groupResetHandler(recorder, req)
+
+	if recorder.Code != 200 {
+		t.Fatal("Hot reload (group) failed, response code was: ", recorder.Code)
+	}
+
+	if len(ApiSpecRegister) == 0 {
+		t.Fatal("Hot reload (group) was triggered but no APIs were found.")
+	}
+
+	for {
+		recvSignal := <-signalChan
+		t.Log("recvSignal = ", recvSignal)
+		if recvSignal {
+			t.Log("Break")
+			break
+		}
+	}
+
 }
