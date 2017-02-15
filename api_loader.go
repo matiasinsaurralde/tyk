@@ -422,21 +422,29 @@ func processSpec(referenceSpec *APISpec,
 			authArray = append(authArray, CreateMiddleware(&OpenIDMW{TykMiddleware: tykMiddleware}, tykMiddleware))
 		}
 
-		if useCoProcessAuth {
-			// TODO: check if mwAuthCheckFunc is available/valid
-			log.WithFields(logrus.Fields{
-				"prefix":   "main",
-				"api_name": referenceSpec.APIDefinition.Name,
-			}).Info("Checking security policy: CoProcess Plugin")
-
-			log.WithFields(logrus.Fields{
-				"prefix":   "coprocess",
-				"api_name": referenceSpec.APIDefinition.Name,
-			}).Debug("Registering coprocess middleware, hook name: ", mwAuthCheckFunc.Name, "hook type: CustomKeyCheck", ", driver: ", mwDriver)
-
+		if EnableCoProcess {
 			if useCoProcessAuth {
+				// TODO: check if mwAuthCheckFunc is available/valid
+				log.WithFields(logrus.Fields{
+					"prefix":   "main",
+					"api_name": referenceSpec.APIDefinition.Name,
+				}).Info("Checking security policy: CoProcess Plugin")
+
+				log.WithFields(logrus.Fields{
+					"prefix":   "coprocess",
+					"api_name": referenceSpec.APIDefinition.Name,
+				}).Debug("Registering coprocess middleware, hook name: ", mwAuthCheckFunc.Name, "hook type: CustomKeyCheck", ", driver: ", mwDriver)
+
 				newExtractor(referenceSpec, tykMiddleware)
 				AppendMiddleware(&authArray, &CoProcessMiddleware{tykMiddleware, coprocess.HookType_CustomKeyCheck, mwAuthCheckFunc.Name, mwDriver}, tykMiddleware)
+			}
+		} else {
+			if referenceSpec.EnableCoProcessAuth {
+				log.WithFields(logrus.Fields{
+					"prefix": "main",
+					"org_id": referenceSpec.APIDefinition.OrgID,
+					"api_id": referenceSpec.APIDefinition.APIID,
+				}).Error("This isn't a coprocess build (or the feature is disabled), skipping custom authentication for API ID: ", referenceSpec.APIID)
 			}
 		}
 
