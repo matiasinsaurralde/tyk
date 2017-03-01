@@ -8,6 +8,7 @@ import (
 	"log/syslog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
@@ -1269,6 +1270,22 @@ func StartDRL() {
 	}
 }
 
+type CfRouter struct {
+	router *mux.Router
+}
+
+func (m CfRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	cfForwardedURL := req.Header.Get("X-Cf-Forwarded-Url")
+	if cfForwardedURL != "" {
+		cfURL, err := url.Parse(cfForwardedURL)
+		if err == nil {
+			req.Host = cfURL.Host
+			req.URL = cfURL
+		}
+	}
+	m.router.ServeHTTP(w, req)
+}
+
 func listen(l net.Listener, controlListener net.Listener, err error) {
 	ReadTimeout := 120
 	WriteTimeout := 120
@@ -1293,10 +1310,13 @@ func listen(l net.Listener, controlListener net.Listener, err error) {
 
 		StartDRL()
 
+		var cfRouter http.Handler
+
 		if !RPC_EmergencyMode {
 			specs := getAPISpecs()
 			if specs != nil {
 				loadApps(specs, defaultRouter)
+				cfRouter = CfRouter{defaultRouter}
 				getPolicies()
 
 				if config.ControlAPIPort > 0 {
@@ -1308,7 +1328,6 @@ func listen(l net.Listener, controlListener net.Listener, err error) {
 		// Use a custom server so we can control keepalives
 		if config.HttpServerOptions.OverrideDefaults {
 			defaultRouter.SkipClean(config.HttpServerOptions.SkipURLCleaning)
-
 			log.WithFields(logrus.Fields{
 				"prefix": "main",
 			}).Info("Custom gateway started")
@@ -1319,7 +1338,7 @@ func listen(l net.Listener, controlListener net.Listener, err error) {
 				Addr:         ":" + targetPort,
 				ReadTimeout:  time.Duration(ReadTimeout) * time.Second,
 				WriteTimeout: time.Duration(WriteTimeout) * time.Second,
-				Handler:      defaultRouter,
+				Handler:      cfRouter,
 			}
 
 			// Accept connections in a new goroutine.
@@ -1330,7 +1349,7 @@ func listen(l net.Listener, controlListener net.Listener, err error) {
 				"prefix": "main",
 			}).Printf("Gateway started (%v)", VERSION)
 			if !RPC_EmergencyMode {
-				http.Handle("/", mainRouter)
+				http.Handle("/", cfRouter)
 			}
 			go http.Serve(l, nil)
 
