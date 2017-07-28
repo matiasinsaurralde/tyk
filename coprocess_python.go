@@ -171,9 +171,9 @@ import (
 	"errors"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 	"unsafe"
-    "runtime"
 
 	"github.com/TykTechnologies/logrus"
 	"github.com/TykTechnologies/tyk/coprocess"
@@ -218,7 +218,7 @@ func (d *PythonDispatcher) Reload() {
 }
 
 // HandleMiddlewareCache isn't used by Python.
-func (d* PythonDispatcher) HandleMiddlewareCache(b *tykcommon.BundleManifest, basePath string) {
+func (d *PythonDispatcher) HandleMiddlewareCache(b *tykcommon.BundleManifest, basePath string) {
 	go func() {
 		runtime.LockOSThread()
 		CBundlePath := C.CString(basePath)
@@ -280,7 +280,7 @@ func PythonSetEnv(pythonPaths ...string) {
 
 // NewCoProcessDispatcher wraps all the actions needed for this CP.
 func NewCoProcessDispatcher() (dispatcher coprocess.Dispatcher, err error) {
-
+	runtime.LockOSThread()
 	workDir, _ := os.Getwd()
 
 	dispatcherPath := path.Join(workDir, "coprocess/python")
