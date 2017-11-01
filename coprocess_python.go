@@ -218,7 +218,7 @@ func (d *PythonDispatcher) HandleMiddlewareCache(b *apidef.BundleManifest, baseP
 		defer func() {
 			runtime.UnlockOSThread()
 			C.free(unsafe.Pointer(CBundlePath))
-		}
+		}()
 		C.Python_HandleMiddlewareCache(CBundlePath)
 		done <- true
 	}()
