@@ -83,11 +83,11 @@ static void Python_HandleMiddlewareCache(char* bundle_path) {
 	PyGILState_Release(gilState);
 }
 
-static int Python_NewDispatcher(char* middleware_path, char* event_handler_path, char* bundle_path) {
+static int Python_NewDispatcher(char* bundle_root_path) {
 	PyThreadState*  mainThreadState = PyEval_SaveThread();
 	gilState = PyGILState_Ensure();
 	if( PyCallable_Check(dispatcher_class) ) {
-		dispatcher_args = PyTuple_Pack( 3, PyUnicode_FromString(middleware_path), PyUnicode_FromString(event_handler_path), PyUnicode_FromString(bundle_path) );
+		dispatcher_args = PyTuple_Pack( 1, PyUnicode_FromString(bundle_root_path) );
 		dispatcher = PyObject_CallObject( dispatcher_class, dispatcher_args );
 
 		if( dispatcher == NULL) {
@@ -251,15 +251,11 @@ func PythonLoadDispatcher() error {
 }
 
 // PythonNewDispatcher creates an instance of TykDispatcher.
-func PythonNewDispatcher(middlewarePath, eventHandlerPath string, bundlePath string) (coprocess.Dispatcher, error) {
-	CMiddlewarePath := C.CString(middlewarePath)
-	defer C.free(unsafe.Pointer(CMiddlewarePath))
-	CEventHandlerPath := C.CString(eventHandlerPath)
-	defer C.free(unsafe.Pointer(CEventHandlerPath))
-	CBundlePath := C.CString(bundlePath)
-	defer C.free(unsafe.Pointer(CBundlePath))
+func PythonNewDispatcher(bundleRootPath string) (coprocess.Dispatcher, error) {
+	CBundleRootPath := C.CString(bundleRootPath)
+	defer C.free(unsafe.Pointer(CBundleRootPath))
 
-	result := C.Python_NewDispatcher(CMiddlewarePath, CEventHandlerPath, CBundlePath)
+	result := C.Python_NewDispatcher(CBundleRootPath)
 	if result == -1 {
 		return nil, errors.New("can't initialize a dispatcher")
 	}
@@ -295,12 +291,10 @@ func NewCoProcessDispatcher() (dispatcher coprocess.Dispatcher, err error) {
 	workDir := config.Global.CoProcessOptions.PythonPathPrefix
 
 	dispatcherPath := filepath.Join(workDir, "coprocess", "python")
-	middlewarePath := filepath.Join(workDir, "middleware", "python")
-	eventHandlerPath := filepath.Join(workDir, "event_handlers")
 	protoPath := filepath.Join(workDir, "coprocess", "python", "proto")
-	bundlePath := filepath.Join(config.Global.MiddlewarePath, "bundles")
+	bundleRootPath := filepath.Join(config.Global.MiddlewarePath, "bundles")
 
-	paths := []string{dispatcherPath, middlewarePath, eventHandlerPath, protoPath, bundlePath}
+	paths := []string{dispatcherPath, protoPath, bundleRootPath}
 
 	// initDone is used to signal the end of Python initialization step:
 	initDone := make(chan error)
@@ -311,7 +305,7 @@ func NewCoProcessDispatcher() (dispatcher coprocess.Dispatcher, err error) {
 		PythonSetEnv(paths...)
 		PythonInit()
 		PythonLoadDispatcher()
-		dispatcher, err = PythonNewDispatcher(middlewarePath, eventHandlerPath, bundlePath)
+		dispatcher, err = PythonNewDispatcher(bundleRootPath)
 		if err != nil {
 			log.WithFields(logrus.Fields{
 				"prefix": "coprocess",
