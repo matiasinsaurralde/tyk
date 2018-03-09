@@ -1,4 +1,4 @@
-import importlib, sys, os
+import imp, sys, os
 from gateway import TykGateway as tyk
 
 class MiddlewareLoader():
@@ -17,9 +17,7 @@ class MiddlewareLoader():
       return self
 
     def load_module(self, module_name):
-      spec = importlib.util.spec_from_file_location(module_name, self.module_path)
-      module = importlib.util.module_from_spec(spec)
-      spec.loader.exec_module(module)
+      module = imp.load_module(module_name, self.module_path)
 
       sys.modules[module_name] = module
       self.mw.imported_modules.append(module_name)
