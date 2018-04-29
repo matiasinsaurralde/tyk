@@ -16,6 +16,7 @@ import (
 	"github.com/satori/go.uuid"
 
 	"github.com/TykTechnologies/tyk/config"
+	"github.com/TykTechnologies/tyk/coprocess"
 	"github.com/TykTechnologies/tyk/storage"
 
 	"github.com/Sirupsen/logrus"
@@ -1127,4 +1128,12 @@ func getDispatcher() *gorpc.Dispatcher {
 
 	return dispatch
 
+}
+
+func (r *RPCStorageHandler) ProtoSetKey(keyName string, session *coprocess.SessionState, timeout int64) error {
+	return nil
+
+}
+func (r *RPCStorageHandler) ProtoGetKey(keyName string) (*coprocess.SessionState, error) {
+	return nil, nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/satori/go.uuid"
 
 	"github.com/TykTechnologies/tyk/config"
+	"github.com/TykTechnologies/tyk/coprocess"
 	"github.com/TykTechnologies/tyk/storage"
 	"github.com/TykTechnologies/tyk/user"
 
@@ -111,23 +112,29 @@ func (b *DefaultSessionManager) ResetQuota(keyName string, session *user.Session
 // UpdateSession updates the session state in the storage engine
 func (b *DefaultSessionManager) UpdateSession(keyName string, session *user.SessionState,
 	resetTTLTo int64, hashed bool) error {
+	// fmt.Println("update session")
+	// protoSession := ProtoSessionState(session)
+
 	if !session.HasChanged() {
 		log.Debug("Session has not changed, not updating")
 		return nil
 	}
 
-	v, _ := json.Marshal(session)
+	s := ProtoSessionState(session)
 
 	// Keep the TTL
 	if config.Global.UseAsyncSessionWrite {
 		if hashed {
-			go b.store.SetRawKey(b.store.GetKeyPrefix()+keyName, string(v), resetTTLTo)
+			// go b.store.SetRawKey(b.store.GetKeyPrefix()+keyName, string(v), resetTTLTo)
+			go b.store.ProtoSetKey(b.store.GetKeyPrefix()+keyName, s, resetTTLTo)
 			return nil
 		}
 
-		go b.store.SetKey(keyName, string(v), resetTTLTo)
+		go b.store.ProtoSetKey(keyName, s, resetTTLTo)
 		return nil
 	}
+
+	v, _ := json.Marshal(session)
 
 	if hashed {
 		return b.store.SetRawKey(b.store.GetKeyPrefix()+keyName, string(v), resetTTLTo)
@@ -147,17 +154,15 @@ func (b *DefaultSessionManager) RemoveSession(keyName string, hashed bool) {
 
 // SessionDetail returns the session detail using the storage engine (either in memory or Redis)
 func (b *DefaultSessionManager) SessionDetail(keyName string, hashed bool) (user.SessionState, bool) {
-	var jsonKeyVal string
+	// var jsonKeyVal string
 	var err error
 	var session user.SessionState
-
-	// get session by key
+	var s *coprocess.SessionState
 	if hashed {
-		jsonKeyVal, err = b.store.GetRawKey(b.store.GetKeyPrefix() + keyName)
+		s, err = b.store.ProtoGetKey(b.store.GetKeyPrefix() + keyName)
 	} else {
-		jsonKeyVal, err = b.store.GetKey(keyName)
+		s, err = b.store.ProtoGetKey(keyName)
 	}
-
 	if err != nil {
 		log.WithFields(logrus.Fields{
 			"prefix":      "auth-mgr",
@@ -166,14 +171,32 @@ func (b *DefaultSessionManager) SessionDetail(keyName string, hashed bool) (user
 		}).Debug("Could not get session detail, key not found")
 		return session, false
 	}
-
-	if err := json.Unmarshal([]byte(jsonKeyVal), &session); err != nil {
-		log.Error("Couldn't unmarshal session object (may be cache miss): ", err)
-		return session, false
-	}
-
 	session.SetFirstSeenHash()
+	session = *TykSessionState(s)
+	/*
+		// get session by key
+		if hashed {
+			jsonKeyVal, err = b.store.GetRawKey(b.store.GetKeyPrefix() + keyName)
+		} else {
+			jsonKeyVal, err = b.store.GetKey(keyName)
+		}
 
+		if err != nil {
+			log.WithFields(logrus.Fields{
+				"prefix":      "auth-mgr",
+				"inbound-key": obfuscateKey(keyName),
+				"err":         err,
+			}).Debug("Could not get session detail, key not found")
+			return session, false
+		}
+
+		if err := json.Unmarshal([]byte(jsonKeyVal), &session); err != nil {
+			log.Error("Couldn't unmarshal session object (may be cache miss): ", err)
+			return session, false
+		}
+
+		session.SetFirstSeenHash()
+	*/
 	return session, true
 }
 

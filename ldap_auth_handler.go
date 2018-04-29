@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/TykTechnologies/tyk/coprocess"
 	ldap "github.com/mavricknz/ldap"
 )
 
@@ -208,4 +209,12 @@ func (l LDAPStorageHandler) GetSortedSetRange(keyName, scoreFrom, scoreTo string
 func (l LDAPStorageHandler) RemoveSortedSetRange(keyName, scoreFrom, scoreTo string) error {
 	log.Error("Not implemented")
 	return nil
+}
+
+func (l LDAPStorageHandler) ProtoSetKey(keyName string, session *coprocess.SessionState, timeout int64) error {
+	return nil
+
+}
+func (l LDAPStorageHandler) ProtoGetKey(keyName string) (*coprocess.SessionState, error) {
+	return nil, nil
 }

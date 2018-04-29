@@ -9,10 +9,12 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/garyburd/redigo/redis"
+	"github.com/gogo/protobuf/proto"
 	"github.com/satori/go.uuid"
 
 	"github.com/TykTechnologies/redigocluster/rediscluster"
 	"github.com/TykTechnologies/tyk/config"
+	"github.com/TykTechnologies/tyk/coprocess"
 )
 
 // ------------------- REDIS CLUSTER STORAGE MANAGER -------------------------------
@@ -251,11 +253,43 @@ func (r RedisCluster) SetExp(keyName string, timeout int64) error {
 	return err
 }
 
+func (r RedisCluster) ProtoSetKey(keyName string, session *coprocess.SessionState, timeout int64) error {
+	log.Debug("[STORE] SET Raw key is: ", keyName)
+	log.Debug("[STORE] Setting key: ", r.fixKey(keyName))
+	r.ensureConnection()
+	data, _ := proto.Marshal(session)
+	// _, err := r.singleton().Do("SET", r.fixKey(keyName), session)
+	_, err := r.singleton().Do("SET", r.fixKey(keyName), data)
+	if timeout > 0 {
+		if err := r.SetExp(keyName, timeout); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		log.Error("Error trying to set value: ", err)
+		return err
+	}
+	return nil
+
+}
+func (r RedisCluster) ProtoGetKey(keyName string) (*coprocess.SessionState, error) {
+	r.ensureConnection()
+	log.Debug("[STORE] Getting WAS: ", keyName)
+	log.Debug("[STORE] Getting: ", r.fixKey(keyName))
+	value, err := redis.Bytes(r.singleton().Do("GET", r.fixKey(keyName)))
+	if err != nil {
+		log.Debug("Error trying to get value:", err)
+		return nil, ErrKeyNotFound
+	}
+	session := &coprocess.SessionState{}
+	proto.Unmarshal(value, session)
+	return session, nil
+}
+
 // SetKey will create (or update) a key value in the store
 func (r RedisCluster) SetKey(keyName, session string, timeout int64) error {
 	log.Debug("[STORE] SET Raw key is: ", keyName)
 	log.Debug("[STORE] Setting key: ", r.fixKey(keyName))
-
 	r.ensureConnection()
 	_, err := r.singleton().Do("SET", r.fixKey(keyName), session)
 	if timeout > 0 {

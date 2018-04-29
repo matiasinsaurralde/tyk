@@ -7,6 +7,7 @@ import (
 	"github.com/spaolacci/murmur3"
 
 	"github.com/TykTechnologies/tyk/config"
+	"github.com/TykTechnologies/tyk/coprocess"
 	logger "github.com/TykTechnologies/tyk/log"
 )
 
@@ -22,6 +23,8 @@ type Handler interface {
 	GetRawKey(string) (string, error)
 	SetKey(string, string, int64) error // Second input string is expected to be a JSON object (user.SessionState)
 	SetRawKey(string, string, int64) error
+	ProtoSetKey(string, *coprocess.SessionState, int64) error
+	ProtoGetKey(string) (*coprocess.SessionState, error)
 	SetExp(string, int64) error   // Set key expiration
 	GetExp(string) (int64, error) // Returns expiry of a key
 	GetKeys(string) []string
