@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -105,7 +106,7 @@ type URLSpec struct {
 	InjectHeadersResponse     apidef.HeaderInjectionMeta
 	HardTimeout               apidef.HardTimeoutMeta
 	CircuitBreaker            ExtendedCircuitBreakerMeta
-	URLRewrite                apidef.URLRewriteMeta
+	URLRewrite                *apidef.URLRewriteMeta
 	VirtualPathSpec           apidef.VirtualMeta
 	RequestSize               apidef.RequestSizeMeta
 	MethodTransform           apidef.MethodTransformMeta
@@ -130,7 +131,10 @@ type APISpec struct {
 	*apidef.APIDefinition
 	sync.Mutex
 
-	RxPaths                  map[string][]URLSpec
+	RxPaths map[string][]URLSpec
+
+	RxPaths2 map[string]*[]URLSpec
+
 	WhiteListEnabled         map[string]bool
 	target                   *url.URL
 	AuthManager              AuthorisationHandler
@@ -200,7 +204,10 @@ func (a APIDefinitionLoader) MakeSpec(def *apidef.APIDefinition) *APISpec {
 		}
 	}
 
+	fmt.Println("*** MakeSpec: populating spec.RxPaths")
 	spec.RxPaths = make(map[string][]URLSpec, len(def.VersionData.Versions))
+	spec.RxPaths2 = make(map[string]*[]URLSpec, len(def.VersionData.Versions))
+
 	spec.WhiteListEnabled = make(map[string]bool, len(def.VersionData.Versions))
 	for _, v := range def.VersionData.Versions {
 		var pathSpecs []URLSpec
@@ -215,6 +222,9 @@ func (a APIDefinitionLoader) MakeSpec(def *apidef.APIDefinition) *APISpec {
 			pathSpecs, whiteListSpecs = a.getPathSpecs(v)
 		}
 		spec.RxPaths[v.Name] = pathSpecs
+
+		spec.RxPaths2[v.Name] = &pathSpecs
+
 		spec.WhiteListEnabled[v.Name] = whiteListSpecs
 	}
 
@@ -675,7 +685,7 @@ func (a APIDefinitionLoader) compileURLRewritesPathSpec(paths []apidef.URLRewrit
 		newSpec := URLSpec{}
 		a.generateRegex(stringSpec.Path, &newSpec, stat)
 		// Extend with method actions
-		newSpec.URLRewrite = stringSpec
+		newSpec.URLRewrite = &stringSpec
 
 		urlSpec = append(urlSpec, newSpec)
 	}
@@ -914,6 +924,60 @@ func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, white
 	return StatusOk, nil
 }
 
+func (a *APISpec) CheckSpecMatchesStatus2(r *http.Request, rxPaths *[]URLSpec, mode URLStatus) (bool, interface{}) {
+	fmt.Println("CheckSpecMatchesStatus2", len(*rxPaths))
+	// Check if ignored
+	for _, v := range *rxPaths {
+		fmt.Println("- v = ", v)
+		if mode != v.Status {
+			continue
+		}
+
+		matchPath := r.URL.Path
+		if !strings.HasPrefix(matchPath, "/") {
+			matchPath = "/" + matchPath
+		}
+		match := v.Spec.MatchString(matchPath)
+
+		// only return it it's what we are looking for
+		if !match {
+			// check for special case when using url_rewrites with transform_response
+			// and specifying the same "path" expression
+
+			if mode == TransformedResponse {
+				if v.TransformResponseAction.Path != ctxGetUrlRewritePath(r) {
+					continue
+				}
+			} else if mode == HeaderInjectedResponse {
+				if v.InjectHeadersResponse.Path != ctxGetUrlRewritePath(r) {
+					continue
+				}
+			} else if mode == TransformedJQResponse {
+				if v.TransformJQResponseAction.Path != ctxGetUrlRewritePath(r) {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+
+		switch v.Status {
+		case URLRewrite:
+			if r.Method == v.URLRewrite.Method {
+				fmt.Println(1, v.URLRewrite)
+				// v.URLRewrite.Method = "POST"
+				fmt.Println(2, v.URLRewrite)
+				// fmt.Println("v.spec=", v.Spec)
+				// v.Spec = regexp.MustCompile("/change")
+				// (*rxPaths)[i] = v
+				return true, v.URLRewrite
+			}
+		}
+	}
+	fmt.Println("CheckSpecMatchesStatus2 returns nil")
+	return false, nil
+}
+
 // CheckSpecMatchesStatus checks if a url spec has a specific status
 func (a *APISpec) CheckSpecMatchesStatus(r *http.Request, rxPaths []URLSpec, mode URLStatus) (bool, interface{}) {
 	// Check if ignored
@@ -1097,6 +1161,65 @@ func (a *APISpec) RequestValid(r *http.Request) (bool, RequestStatus, interface{
 	default:
 		return true, StatusOk, expTime
 	}
+}
+
+func (a *APISpec) Version2(r *http.Request) (*apidef.VersionInfo, *[]URLSpec, bool, RequestStatus) {
+	var version apidef.VersionInfo
+
+	// try the context first
+	if v := ctxGetVersionInfo(r); v != nil {
+		version = *v
+	} else {
+		// Are we versioned?
+		if a.VersionData.NotVersioned {
+			// Get the first one in the list
+			for _, v := range a.VersionData.Versions {
+				version = v
+				break
+			}
+		} else {
+			// Extract Version Info
+			// First checking for if default version is set
+			vname := a.getVersionFromRequest(r)
+			if vname == "" && a.VersionData.DefaultVersion != "" {
+				vname = a.VersionData.DefaultVersion
+				ctxSetDefaultVersion(r)
+			}
+			if vname == "" && a.VersionData.DefaultVersion == "" {
+				return &version, nil, false, VersionNotFound
+			}
+			// Load Version Data - General
+			var ok bool
+			if version, ok = a.VersionData.Versions[vname]; !ok {
+				return &version, nil, false, VersionDoesNotExist
+			}
+		}
+
+		// cache for the future
+		ctxSetVersionInfo(r, &version)
+	}
+
+	fmt.Println("*** Load path data")
+	// Load path data and whitelist data for version
+	rxPaths, rxOk := a.RxPaths2[version.Name]
+	whiteListStatus, wlOk := a.WhiteListEnabled[version.Name]
+
+	fmt.Println("rxPaths = ", len(*rxPaths), rxPaths)
+
+	if !rxOk {
+		log.Error("no RX Paths found for version ", version.Name)
+		return &version, nil, false, VersionDoesNotExist
+	}
+
+	if !wlOk {
+		log.Error("No whitelist data found")
+		return &version, nil, false, VersionWhiteListStatusNotFound
+	}
+
+	fmt.Println("*** Version2 returns")
+
+	return &version, rxPaths, whiteListStatus, StatusOk
+
 }
 
 // Version attempts to extract the version data from a request, depending on where it is stored in the

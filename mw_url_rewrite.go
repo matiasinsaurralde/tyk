@@ -26,11 +26,13 @@ var contextMatch = regexp.MustCompile(`\$tyk_context.([A-Za-z0-9_\-\.]+)`)
 var metaMatch = regexp.MustCompile(`\$tyk_meta.([A-Za-z0-9_\-\.]+)`)
 
 func urlRewrite(meta *apidef.URLRewriteMeta, r *http.Request) (string, error) {
+	fmt.Println("*** meta.MatchRegexp = ", meta.MatchRegexp)
 	path := r.URL.String()
 	log.Debug("Inbound path: ", path)
 	newpath := path
 
 	if meta.MatchRegexp == nil {
+		fmt.Println("*** compile regexp!")
 		var err error
 		meta.MatchRegexp, err = regexp.Compile(meta.MatchPattern)
 		if err != nil {
@@ -315,8 +317,22 @@ func (m *URLRewriteMiddleware) CheckHostRewrite(oldPath, newTarget string, r *ht
 
 // ProcessRequest will run any checks on the request on the way through the system, return an error to have the chain fail
 func (m *URLRewriteMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Request, _ interface{}) (error, int) {
-	_, versionPaths, _, _ := m.Spec.Version(r)
-	found, meta := m.Spec.CheckSpecMatchesStatus(r, versionPaths, URLRewrite)
+	_, versionPaths, _, _ := m.Spec.Version2(r)
+
+	paths := *versionPaths
+	// paths := *versionPaths
+	/*
+		fmt.Println("paths len = ", len(paths))
+		if len(paths) == 1 {
+			x := URLSpec{}
+			paths = append(paths, x)
+		}
+		*versionPaths = paths
+		fmt.Println("paths len = ", len(*versionPaths))
+	*/
+
+	found, meta := m.Spec.CheckSpecMatchesStatus2(r, &paths, URLRewrite)
+	fmt.Println("meta = ", meta, "found = ", found)
 	if !found {
 		return nil, 200
 	}
@@ -325,6 +341,10 @@ func (m *URLRewriteMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Req
 	umeta := meta.(*apidef.URLRewriteMeta)
 	log.Debug(r.URL)
 	oldPath := r.URL.String()
+	fmt.Println("*** Calling urlRewrite")
+	fmt.Println(1, umeta)
+	// umeta.Method = "POST"
+	fmt.Println(2, umeta)
 	p, err := urlRewrite(umeta, r)
 	if err != nil {
 		log.Error(err)
