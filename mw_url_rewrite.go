@@ -319,7 +319,7 @@ func (m *URLRewriteMiddleware) CheckHostRewrite(oldPath, newTarget string, r *ht
 func (m *URLRewriteMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Request, _ interface{}) (error, int) {
 	_, versionPaths, _, _ := m.Spec.Version2(r)
 
-	paths := *versionPaths
+	paths := versionPaths
 	// paths := *versionPaths
 	/*
 		fmt.Println("paths len = ", len(paths))
@@ -331,7 +331,7 @@ func (m *URLRewriteMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Req
 		fmt.Println("paths len = ", len(*versionPaths))
 	*/
 
-	found, meta := m.Spec.CheckSpecMatchesStatus2(r, &paths, URLRewrite)
+	found, meta := m.Spec.CheckSpecMatchesStatus2(r, paths, URLRewrite)
 	fmt.Println("meta = ", meta, "found = ", found)
 	if !found {
 		return nil, 200

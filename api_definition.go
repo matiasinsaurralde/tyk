@@ -133,7 +133,7 @@ type APISpec struct {
 
 	RxPaths map[string][]URLSpec
 
-	RxPaths2 map[string]*[]URLSpec
+	RxPaths2 map[string][]*URLSpec
 
 	WhiteListEnabled         map[string]bool
 	target                   *url.URL
@@ -206,24 +206,27 @@ func (a APIDefinitionLoader) MakeSpec(def *apidef.APIDefinition) *APISpec {
 
 	fmt.Println("*** MakeSpec: populating spec.RxPaths")
 	spec.RxPaths = make(map[string][]URLSpec, len(def.VersionData.Versions))
-	spec.RxPaths2 = make(map[string]*[]URLSpec, len(def.VersionData.Versions))
+	spec.RxPaths2 = make(map[string][]*URLSpec, len(def.VersionData.Versions))
 
 	spec.WhiteListEnabled = make(map[string]bool, len(def.VersionData.Versions))
 	for _, v := range def.VersionData.Versions {
 		var pathSpecs []URLSpec
+		var pathSpecs2 []*URLSpec
 		var whiteListSpecs bool
 
 		// If we have transitioned to extended path specifications, we should use these now
 		if v.UseExtendedPaths {
 			pathSpecs, whiteListSpecs = a.getExtendedPathSpecs(v, spec)
+			pathSpecs2, _ = a.getExtendedPathSpecs2(v, spec)
 
 		} else {
 			log.Warning("Legacy path detected! Upgrade to extended.")
 			pathSpecs, whiteListSpecs = a.getPathSpecs(v)
+			pathSpecs2, _ = a.getPathSpecs2(v)
 		}
 		spec.RxPaths[v.Name] = pathSpecs
 
-		spec.RxPaths2[v.Name] = &pathSpecs
+		spec.RxPaths2[v.Name] = pathSpecs2
 
 		spec.WhiteListEnabled[v.Name] = whiteListSpecs
 	}
@@ -416,6 +419,11 @@ func (a APIDefinitionLoader) getPathSpecs(apiVersionDef apidef.VersionInfo) ([]U
 	combinedPath = append(combinedPath, whiteListPaths...)
 
 	return combinedPath, len(whiteListPaths) > 0
+}
+
+func (a APIDefinitionLoader) getPathSpecs2(apiVersionDef apidef.VersionInfo) ([]*URLSpec, bool) {
+	combinedPath := []*URLSpec{}
+	return combinedPath, false
 }
 
 func (a APIDefinitionLoader) generateRegex(stringSpec string, newSpec *URLSpec, specType URLStatus) {
@@ -693,6 +701,23 @@ func (a APIDefinitionLoader) compileURLRewritesPathSpec(paths []apidef.URLRewrit
 	return urlSpec
 }
 
+func (a APIDefinitionLoader) compileURLRewritesPathSpec2(paths []apidef.URLRewriteMeta, stat URLStatus) []*URLSpec {
+	// transform an extended configuration URL into an array of URLSpecs
+	// This way we can iterate the whole array once, on match we break with status
+	urlSpec := []*URLSpec{}
+
+	for _, stringSpec := range paths {
+		newSpec := &URLSpec{}
+		a.generateRegex(stringSpec.Path, newSpec, stat)
+		// Extend with method actions
+		newSpec.URLRewrite = &stringSpec
+
+		urlSpec = append(urlSpec, newSpec)
+	}
+
+	return urlSpec
+}
+
 func (a APIDefinitionLoader) compileVirtualPathspathSpec(paths []apidef.VirtualMeta, stat URLStatus, apiSpec *APISpec) []URLSpec {
 	if !config.Global.EnableJSVM {
 		return nil
@@ -813,6 +838,15 @@ func (a APIDefinitionLoader) getExtendedPathSpecs(apiVersionDef apidef.VersionIn
 	return combinedPath, len(whiteListPaths) > 0
 }
 
+func (a APIDefinitionLoader) getExtendedPathSpecs2(apiVersionDef apidef.VersionInfo, apiSpec *APISpec) ([]*URLSpec, bool) {
+	// TODO: New compiler here, needs to put data into a different structure
+	urlRewrites := a.compileURLRewritesPathSpec2(apiVersionDef.ExtendedPaths.URLRewrite, URLRewrite)
+	combinedPath := []*URLSpec{}
+	combinedPath = append(combinedPath, urlRewrites...)
+	// false?
+	return combinedPath, false
+}
+
 func (a *APISpec) Init(authStore, sessionStore, healthStore, orgStore storage.Handler) {
 	a.AuthManager.Init(authStore)
 	a.SessionManager.Init(sessionStore)
@@ -924,10 +958,10 @@ func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, white
 	return StatusOk, nil
 }
 
-func (a *APISpec) CheckSpecMatchesStatus2(r *http.Request, rxPaths *[]URLSpec, mode URLStatus) (bool, interface{}) {
-	fmt.Println("CheckSpecMatchesStatus2", len(*rxPaths))
+func (a *APISpec) CheckSpecMatchesStatus2(r *http.Request, rxPaths []*URLSpec, mode URLStatus) (bool, interface{}) {
+	fmt.Println("CheckSpecMatchesStatus2", len(rxPaths))
 	// Check if ignored
-	for _, v := range *rxPaths {
+	for _, v := range rxPaths {
 		fmt.Println("- v = ", v)
 		if mode != v.Status {
 			continue
@@ -1163,7 +1197,7 @@ func (a *APISpec) RequestValid(r *http.Request) (bool, RequestStatus, interface{
 	}
 }
 
-func (a *APISpec) Version2(r *http.Request) (*apidef.VersionInfo, *[]URLSpec, bool, RequestStatus) {
+func (a *APISpec) Version2(r *http.Request) (*apidef.VersionInfo, []*URLSpec, bool, RequestStatus) {
 	var version apidef.VersionInfo
 
 	// try the context first
@@ -1200,11 +1234,12 @@ func (a *APISpec) Version2(r *http.Request) (*apidef.VersionInfo, *[]URLSpec, bo
 	}
 
 	fmt.Println("*** Load path data")
+	fmt.Println(123, a.RxPaths2, 456, a.RxPaths)
 	// Load path data and whitelist data for version
 	rxPaths, rxOk := a.RxPaths2[version.Name]
 	whiteListStatus, wlOk := a.WhiteListEnabled[version.Name]
 
-	fmt.Println("rxPaths = ", len(*rxPaths), rxPaths)
+	// fmt.Println("rxPaths = ", len(*rxPaths), rxPaths)
 
 	if !rxOk {
 		log.Error("no RX Paths found for version ", version.Name)
