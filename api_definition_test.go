@@ -451,13 +451,13 @@ func TestGetVersionFromRequest(t *testing.T) {
 }
 
 func BenchmarkGetVersionFromRequest(b *testing.B) {
+	b.ReportAllocs()
 	ts := newTykTestServer()
 	defer ts.Close()
 
 	versionInfo := apidef.VersionInfo{}
 	versionInfo.Paths.WhiteList = []string{"/foo"}
 	versionInfo.Paths.BlackList = []string{"/bar"}
-
 	b.Run("Header location", func(b *testing.B) {
 		buildAndLoadAPI(func(spec *APISpec) {
 			spec.Proxy.ListenPath = "/"
@@ -491,7 +491,6 @@ func BenchmarkGetVersionFromRequest(b *testing.B) {
 			}...)
 		}
 	})
-
 	b.Run("URL location", func(b *testing.B) {
 		buildAndLoadAPI(func(spec *APISpec) {
 			spec.Proxy.ListenPath = "/"
