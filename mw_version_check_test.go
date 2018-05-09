@@ -24,6 +24,20 @@ func testPrepareVersioning() (string, string) {
 			Name:             "v2",
 			UseExtendedPaths: true,
 			ExtendedPaths: apidef.ExtendedPathsSet{
+				URLRewrite: []apidef.URLRewriteMeta{
+					apidef.URLRewriteMeta{
+						Path:         "/a",
+						Method:       http.MethodGet,
+						MatchPattern: "/a(.*)",
+						RewriteTo:    "/b",
+					},
+					apidef.URLRewriteMeta{
+						Path:         "/c",
+						Method:       http.MethodPost,
+						MatchPattern: "/c(.*)",
+						RewriteTo:    "/d",
+					},
+				},
 				WhiteList: []apidef.EndPointMeta{
 					{
 						Path: "/mock",
