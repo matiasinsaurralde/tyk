@@ -31,6 +31,14 @@ const (
 	RPCStorageEngine  apidef.StorageEngineCode = "rpc"
 )
 
+// Constants used by the version check middleware
+const (
+	headerLocation    = "header"
+	urlParamLocation  = "url-param"
+	urlLocation       = "url"
+	expiredTimeFormat = "2006-01-02 15:04"
+)
+
 // URLStatus is a custom enum type to avoid collisions
 type URLStatus int
 
@@ -862,9 +870,10 @@ func (a *APISpec) getURLStatus(stat URLStatus) RequestStatus {
 
 // URLAllowedAndIgnored checks if a url is allowed and ignored.
 func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, whiteListStatus bool) (RequestStatus, interface{}) {
+	path := strings.ToLower(r.URL.Path)
 	// Check if ignored
 	for _, v := range rxPaths {
-		if !v.Spec.MatchString(strings.ToLower(r.URL.Path)) {
+		if !v.Spec.MatchString(path) {
 			continue
 		}
 		if v.MethodActions != nil {
@@ -919,15 +928,14 @@ func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, white
 
 // CheckSpecMatchesStatus checks if a url spec has a specific status
 func (a *APISpec) CheckSpecMatchesStatus(r *http.Request, rxPaths []URLSpec, mode URLStatus) (bool, interface{}) {
+	matchPath := r.URL.Path
+	if !strings.HasPrefix(matchPath, "/") {
+		matchPath = "/" + matchPath
+	}
 	// Check if ignored
 	for _, v := range rxPaths {
 		if mode != v.Status {
 			continue
-		}
-
-		matchPath := r.URL.Path
-		if !strings.HasPrefix(matchPath, "/") {
-			matchPath = "/" + matchPath
 		}
 		match := v.Spec.MatchString(matchPath)
 
@@ -1023,13 +1031,13 @@ func (a *APISpec) CheckSpecMatchesStatus(r *http.Request, rxPaths []URLSpec, mod
 
 func (a *APISpec) getVersionFromRequest(r *http.Request) string {
 	switch a.VersionDefinition.Location {
-	case "header":
+	case headerLocation:
 		return r.Header.Get(a.VersionDefinition.Key)
 
-	case "url-param":
+	case urlParamLocation:
 		return r.URL.Query().Get(a.VersionDefinition.Key)
 
-	case "url":
+	case urlLocation:
 		url := strings.Replace(r.URL.Path, a.Proxy.ListenPath, "", 1)
 		// First non-empty part of the path is the version ID
 		for _, part := range strings.Split(url, "/") {
@@ -1055,7 +1063,7 @@ func (a *APISpec) VersionExpired(versionDef *apidef.VersionInfo) (bool, *time.Ti
 	}
 
 	// otherwise - calculate the time
-	t, err := time.Parse("2006-01-02 15:04", versionDef.Expires)
+	t, err := time.Parse(expiredTimeFormat, versionDef.Expires)
 	if err != nil {
 		log.Error("Could not parse expiry date for API, dissallow: ", err)
 		return true, nil
@@ -1071,7 +1079,6 @@ func (a *APISpec) VersionExpired(versionDef *apidef.VersionInfo) (bool, *time.Ti
 // request
 func (a *APISpec) RequestValid(r *http.Request) (bool, RequestStatus, interface{}) {
 	versionMetaData, versionPaths, whiteListStatus, vstat := a.Version(r)
-
 	// Screwed up version info - fail and pass through
 	if vstat != StatusOk {
 		return false, vstat, nil
