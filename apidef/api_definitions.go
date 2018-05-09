@@ -220,6 +220,11 @@ type VersionInfo struct {
 	GlobalHeadersRemove []string          `bson:"global_headers_remove" json:"global_headers_remove"`
 	GlobalSizeLimit     int64             `bson:"global_size_limit" json:"global_size_limit"`
 	OverrideTarget      string            `bson:"override_target" json:"override_target"`
+
+	MatchingPaths interface{} `bson:"-" json:"-"`
+	// NonMatchingPaths interface{} `bson:"-" json:"-"`
+	Whitelisted bool   `bson:"-" json:"-"`
+	CurrentURL  string `bson:"-" json:"-"`
 }
 
 type AuthProviderMeta struct {

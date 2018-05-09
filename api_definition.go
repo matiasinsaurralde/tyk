@@ -122,6 +122,8 @@ type URLSpec struct {
 	TrackEndpoint             apidef.TrackEndpointMeta
 	DoNotTrackEndpoint        apidef.TrackEndpointMeta
 	ValidatePathMeta          apidef.ValidatePathMeta
+
+	matches bool
 }
 
 type TransformSpec struct {
@@ -872,12 +874,13 @@ func (a *APISpec) getURLStatus(stat URLStatus) RequestStatus {
 
 // URLAllowedAndIgnored checks if a url is allowed and ignored.
 func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, whiteListStatus bool) (RequestStatus, interface{}) {
-	path := strings.ToLower(r.URL.Path)
+	// path := strings.ToLower(r.URL.Path)
 	// Check if ignored
 	for _, v := range rxPaths {
-		if !v.Spec.MatchString(path) {
-			continue
-		}
+		// fmt.Println("- Calling v.Spec.MatchString = ", v.Spec.String(), " - ", path)
+		//if !v.Spec.MatchString(path) {
+		//	continue
+		//}
 		if v.MethodActions != nil {
 			// We are using an extended path set, check for the method
 			methodMeta, matchMethodOk := v.MethodActions[r.Method]
@@ -930,22 +933,29 @@ func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, white
 
 // CheckSpecMatchesStatus checks if a url spec has a specific status
 func (a *APISpec) CheckSpecMatchesStatus(r *http.Request, rxPaths []URLSpec, mode URLStatus) (bool, interface{}) {
-	matchPath := r.URL.Path
-	if !strings.HasPrefix(matchPath, "/") {
-		matchPath = "/" + matchPath
+	pc, _, _, ok := runtime.Caller(1)
+	details := runtime.FuncForPC(pc)
+	if ok && details != nil {
+		fmt.Printf("called from %s\n", details.Name())
 	}
-	// Check if ignored
+	/*
+		matchPath := r.URL.Path
+		if !strings.HasPrefix(matchPath, "/") {
+			matchPath = "/" + matchPath
+		}
+	*/
+	/* Check if ignored*/
+	fmt.Println("len = ", len(rxPaths))
 	for _, v := range rxPaths {
+		fmt.Println("CheckSpec: ", v.Spec.String(), r.URL.Path, " = ", v.matches)
 		if mode != v.Status {
 			continue
 		}
-		match := v.Spec.MatchString(matchPath)
 
 		// only return it it's what we are looking for
-		if !match {
+		if !v.matches {
 			// check for special case when using url_rewrites with transform_response
 			// and specifying the same "path" expression
-
 			if mode == TransformedResponse {
 				if v.TransformResponseAction.Path != ctxGetUrlRewritePath(r) {
 					continue
@@ -1236,17 +1246,30 @@ func (a *APISpec) Version2(r *http.Request) (result versionInfo) {
 // Version attempts to extract the version data from a request, depending on where it is stored in the
 // request (currently only "header" is supported)
 func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool, RequestStatus) {
-	pc, _, _, ok := runtime.Caller(1)
-	details := runtime.FuncForPC(pc)
-	if ok && details != nil {
-		fmt.Printf("called from %s\n", details.Name())
-	}
+	/*
+		pc, _, _, ok := runtime.Caller(1)
+		details := runtime.FuncForPC(pc)
+		if ok && details != nil {
+			fmt.Printf("called from %s\n", details.Name())
+		}
+	*/
 	var version apidef.VersionInfo
+
+	var cached bool
+	var matchAgain bool
+
+	url := r.URL.Path
+	if !strings.HasPrefix(url, "/") {
+		url = "/" + url
+	}
 
 	// try the context first
 	if v := ctxGetVersionInfo(r); v != nil {
+		// fmt.Println("*** Version is taken from cache", v.RxPaths)
 		version = *v
+		cached = true
 	} else {
+		// fmt.Println("*** Version is initially cached")
 		// Are we versioned?
 		if a.VersionData.NotVersioned {
 			// Get the first one in the list
@@ -1271,26 +1294,63 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 				return &version, nil, false, VersionDoesNotExist
 			}
 		}
-
 		// cache for the future
+		//
+	}
+	// fmt.Println("Cached urL is = ", version.CurrentURL, " current url is ", url)
+	if version.CurrentURL != url && cached {
+		fmt.Println("URL changed, setting MatchAgain")
+		matchAgain = true
+	}
+
+	var matchingPaths []URLSpec
+	if matchAgain {
+		fmt.Println("!!! matching again", url)
+		matchingPaths = []URLSpec{}
+		for _, path := range version.MatchingPaths.([]URLSpec) {
+			path.matches = path.Spec.MatchString(url)
+			matchingPaths = append(matchingPaths, path)
+		}
+		version.MatchingPaths = matchingPaths
+		version.CurrentURL = url
 		ctxSetVersionInfo(r, &version)
+		return &version, matchingPaths, version.Whitelisted, StatusOk
 	}
+	if !cached {
+		fmt.Println("!!! matching for the first time")
+		// Load path data and whitelist data for version
+		rxPaths, rxOk := a.RxPaths[version.Name]
 
-	// Load path data and whitelist data for version
-	rxPaths, rxOk := a.RxPaths[version.Name]
-	whiteListStatus, wlOk := a.WhiteListEnabled[version.Name]
+		if !rxOk {
+			log.Error("no RX Paths found for version ", version.Name)
+			return &version, nil, false, VersionDoesNotExist
+		}
 
-	if !rxOk {
-		log.Error("no RX Paths found for version ", version.Name)
-		return &version, nil, false, VersionDoesNotExist
+		whiteListStatus, wlOk := a.WhiteListEnabled[version.Name]
+
+		if !wlOk {
+			log.Error("No whitelist data found")
+			return &version, nil, false, VersionWhiteListStatusNotFound
+		}
+		version.Whitelisted = whiteListStatus
+
+		matchingPaths = []URLSpec{}
+		// nonMatchingPaths = []URLSpec{}
+		for _, path := range rxPaths {
+			path.matches = path.Spec.MatchString(url)
+			fmt.Println("Version: ", path.Spec.String(), r.URL.Path, " = ", path.matches)
+			matchingPaths = append(matchingPaths, path)
+		}
+		version.MatchingPaths = matchingPaths
+		version.CurrentURL = url
+
+		// fmt.Println("caching!")
+		ctxSetVersionInfo(r, &version)
+		return &version, matchingPaths, version.Whitelisted, StatusOk
 	}
-
-	if !wlOk {
-		log.Error("No whitelist data found")
-		return &version, nil, false, VersionWhiteListStatusNotFound
-	}
-
-	return &version, rxPaths, whiteListStatus, StatusOk
+	matchingPaths = version.MatchingPaths.([]URLSpec)
+	// nonMatchingPaths = version.NonMatchingPaths.([]URLSpec)
+	return &version, matchingPaths, version.Whitelisted, StatusOk
 
 }
 
