@@ -315,8 +315,9 @@ func (m *URLRewriteMiddleware) CheckHostRewrite(oldPath, newTarget string, r *ht
 
 // ProcessRequest will run any checks on the request on the way through the system, return an error to have the chain fail
 func (m *URLRewriteMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Request, _ interface{}) (error, int) {
-	_, versionPaths, _, _ := m.Spec.Version(r)
-	found, meta := m.Spec.CheckSpecMatchesStatus(r, versionPaths, URLRewrite)
+	// _, versionPaths, _, _ := m.Spec.Version(r)
+	v := m.Spec.Version2(r)
+	found, meta := m.Spec.CheckSpecMatchesStatus(r, v.paths, URLRewrite)
 	if !found {
 		return nil, 200
 	}

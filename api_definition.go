@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"text/template"
@@ -1074,6 +1076,55 @@ func (a *APISpec) VersionExpired(versionDef *apidef.VersionInfo) (bool, *time.Ti
 	return time.Since(t) >= 0, &t
 }
 
+type requestValidStruct struct {
+	valid  bool
+	status RequestStatus
+	meta   interface{}
+}
+
+func (a *APISpec) RequestValid2(r *http.Request) (result requestValidStruct) {
+	v := a.Version2(r)
+	// versionMetaData, versionPaths, whiteListStatus, vstat := a.Version(r)
+	// Screwed up version info - fail and pass through
+	if v.status != StatusOk {
+		result.status = v.status
+		return result
+	}
+
+	// Is the API version expired?
+	// TODO: Don't abuse the interface{} return value for both
+	// *apidef.EndpointMethodMeta and *time.Time. Probably need to
+	// redesign or entirely remove RequestValid. See discussion on
+	// https://github.com/TykTechnologies/tyk/pull/776
+	expired, expTime := a.VersionExpired(v.v)
+	if expired {
+		result.status = VersionExpired
+		return result
+	}
+
+	// not expired, let's check path info
+	result.status, result.meta = a.URLAllowedAndIgnored(r, v.paths, v.whitelisted)
+	switch result.status {
+	case EndPointNotAllowed:
+		result.meta = expTime
+		break
+	case StatusRedirectFlowByReply:
+		result.valid = true
+		break
+	case StatusOkAndIgnore, StatusCached, StatusTransform,
+		StatusHeaderInjected, StatusMethodTransformed:
+		result.valid = true
+		result.meta = expTime
+		break
+	default:
+		result.valid = true
+		result.status = StatusOk
+		result.meta = expTime
+		break
+	}
+	return result
+}
+
 // RequestValid will check if an incoming request has valid version
 // data and return a RequestStatus that describes the status of the
 // request
@@ -1109,9 +1160,87 @@ func (a *APISpec) RequestValid(r *http.Request) (bool, RequestStatus, interface{
 	}
 }
 
+type versionInfo struct {
+	v           *apidef.VersionInfo
+	paths       []URLSpec
+	whitelisted bool
+	status      RequestStatus
+
+	location string
+}
+
+func (a *APISpec) Version2(r *http.Request) (result versionInfo) {
+	var version apidef.VersionInfo
+
+	// try the context first
+	if v := ctxGetVersionInfo(r); v != nil {
+		version = *v
+	} else {
+		// Are we versioned?
+		if a.VersionData.NotVersioned {
+			// Get the first one in the list
+			for _, v := range a.VersionData.Versions {
+				version = v
+				break
+			}
+		} else {
+			// Extract Version Info
+			// First checking for if default version is set
+			vname := a.getVersionFromRequest(r)
+			if vname == "" && a.VersionData.DefaultVersion != "" {
+				vname = a.VersionData.DefaultVersion
+				ctxSetDefaultVersion(r)
+			}
+			if vname == "" && a.VersionData.DefaultVersion == "" {
+				result.v = &version
+				result.status = VersionNotFound
+				return result
+			}
+			// Load Version Data - General
+			var ok bool
+			if version, ok = a.VersionData.Versions[vname]; !ok {
+				result.v = &version
+				result.status = VersionDoesNotExist
+				return result
+			}
+		}
+
+		// cache for the future
+		ctxSetVersionInfo(r, &version)
+	}
+
+	// Load path data and whitelist data for version
+	var ok bool
+	result.paths, ok = a.RxPaths[version.Name]
+
+	result.v = &version
+	if !ok {
+		log.Error("no RX Paths found for version ", version.Name)
+		result.status = VersionDoesNotExist
+		return result
+	}
+
+	result.whitelisted, ok = a.WhiteListEnabled[version.Name]
+
+	if !ok {
+		log.Error("No whitelist data found")
+		result.status = VersionWhiteListStatusNotFound
+		return result
+	}
+
+	result.status = StatusOk
+
+	return result
+}
+
 // Version attempts to extract the version data from a request, depending on where it is stored in the
 // request (currently only "header" is supported)
 func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool, RequestStatus) {
+	pc, _, _, ok := runtime.Caller(1)
+	details := runtime.FuncForPC(pc)
+	if ok && details != nil {
+		fmt.Printf("called from %s\n", details.Name())
+	}
 	var version apidef.VersionInfo
 
 	// try the context first
