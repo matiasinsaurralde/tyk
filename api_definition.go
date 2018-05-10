@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"text/template"
@@ -877,10 +875,9 @@ func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, white
 	// path := strings.ToLower(r.URL.Path)
 	// Check if ignored
 	for _, v := range rxPaths {
-		// fmt.Println("- Calling v.Spec.MatchString = ", v.Spec.String(), " - ", path)
-		//if !v.Spec.MatchString(path) {
-		//	continue
-		//}
+		if !v.matches {
+			continue
+		}
 		if v.MethodActions != nil {
 			// We are using an extended path set, check for the method
 			methodMeta, matchMethodOk := v.MethodActions[r.Method]
@@ -933,21 +930,7 @@ func (a *APISpec) URLAllowedAndIgnored(r *http.Request, rxPaths []URLSpec, white
 
 // CheckSpecMatchesStatus checks if a url spec has a specific status
 func (a *APISpec) CheckSpecMatchesStatus(r *http.Request, rxPaths []URLSpec, mode URLStatus) (bool, interface{}) {
-	pc, _, _, ok := runtime.Caller(1)
-	details := runtime.FuncForPC(pc)
-	if ok && details != nil {
-		fmt.Printf("called from %s\n", details.Name())
-	}
-	/*
-		matchPath := r.URL.Path
-		if !strings.HasPrefix(matchPath, "/") {
-			matchPath = "/" + matchPath
-		}
-	*/
-	/* Check if ignored*/
-	fmt.Println("len = ", len(rxPaths))
 	for _, v := range rxPaths {
-		fmt.Println("CheckSpec: ", v.Spec.String(), r.URL.Path, " = ", v.matches)
 		if mode != v.Status {
 			continue
 		}
@@ -1246,13 +1229,6 @@ func (a *APISpec) Version2(r *http.Request) (result versionInfo) {
 // Version attempts to extract the version data from a request, depending on where it is stored in the
 // request (currently only "header" is supported)
 func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool, RequestStatus) {
-	/*
-		pc, _, _, ok := runtime.Caller(1)
-		details := runtime.FuncForPC(pc)
-		if ok && details != nil {
-			fmt.Printf("called from %s\n", details.Name())
-		}
-	*/
 	var version apidef.VersionInfo
 
 	var cached bool
@@ -1265,11 +1241,9 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 
 	// try the context first
 	if v := ctxGetVersionInfo(r); v != nil {
-		// fmt.Println("*** Version is taken from cache", v.RxPaths)
 		version = *v
 		cached = true
 	} else {
-		// fmt.Println("*** Version is initially cached")
 		// Are we versioned?
 		if a.VersionData.NotVersioned {
 			// Get the first one in the list
@@ -1297,15 +1271,12 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 		// cache for the future
 		//
 	}
-	// fmt.Println("Cached urL is = ", version.CurrentURL, " current url is ", url)
 	if version.CurrentURL != url && cached {
-		fmt.Println("URL changed, setting MatchAgain")
 		matchAgain = true
 	}
 
 	var matchingPaths []URLSpec
 	if matchAgain {
-		fmt.Println("!!! matching again", url)
 		matchingPaths = []URLSpec{}
 		for _, path := range version.MatchingPaths.([]URLSpec) {
 			path.matches = path.Spec.MatchString(url)
@@ -1317,7 +1288,6 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 		return &version, matchingPaths, version.Whitelisted, StatusOk
 	}
 	if !cached {
-		fmt.Println("!!! matching for the first time")
 		// Load path data and whitelist data for version
 		rxPaths, rxOk := a.RxPaths[version.Name]
 
@@ -1335,21 +1305,16 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 		version.Whitelisted = whiteListStatus
 
 		matchingPaths = []URLSpec{}
-		// nonMatchingPaths = []URLSpec{}
 		for _, path := range rxPaths {
 			path.matches = path.Spec.MatchString(url)
-			fmt.Println("Version: ", path.Spec.String(), r.URL.Path, " = ", path.matches)
 			matchingPaths = append(matchingPaths, path)
 		}
 		version.MatchingPaths = matchingPaths
 		version.CurrentURL = url
-
-		// fmt.Println("caching!")
 		ctxSetVersionInfo(r, &version)
 		return &version, matchingPaths, version.Whitelisted, StatusOk
 	}
 	matchingPaths = version.MatchingPaths.([]URLSpec)
-	// nonMatchingPaths = version.NonMatchingPaths.([]URLSpec)
 	return &version, matchingPaths, version.Whitelisted, StatusOk
 
 }

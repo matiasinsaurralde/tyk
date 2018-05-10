@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -40,7 +39,6 @@ func (v *VersionCheck) DoMockReply(w http.ResponseWriter, meta interface{}) {
 func (v *VersionCheck) ProcessRequest(w http.ResponseWriter, r *http.Request, _ interface{}) (error, int) {
 	// Check versioning, blacklist, whitelist and ignored status
 	// result := v.Spec.RequestValid2(r)
-	fmt.Println("VersionCheck")
 	requestValid, stat, meta := v.Spec.RequestValid(r)
 	if !requestValid {
 		// Fire a versioning failure event
