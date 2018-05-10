@@ -28,20 +28,20 @@ func (t *TransformHeaders) EnabledForSpec() bool {
 
 // ProcessRequest will run any checks on the request on the way through the system, return an error to have the chain fail
 func (t *TransformHeaders) ProcessRequest(w http.ResponseWriter, r *http.Request, _ interface{}) (error, int) {
-	vInfo, versionPaths, _, _ := t.Spec.Version(r)
+	v := t.Spec.Version(r)
 
 	// Manage global headers first - remove
-	for _, gdKey := range vInfo.GlobalHeadersRemove {
+	for _, gdKey := range v.versioninfo.GlobalHeadersRemove {
 		log.Debug("Removing: ", gdKey)
 		r.Header.Del(gdKey)
 	}
 
 	// Add
-	for nKey, nVal := range vInfo.GlobalHeaders {
+	for nKey, nVal := range v.versioninfo.GlobalHeaders {
 		r.Header.Set(nKey, replaceTykVariables(r, nVal, false))
 	}
 
-	found, meta := t.Spec.CheckSpecMatchesStatus(r, versionPaths, HeaderInjected)
+	found, meta := t.Spec.CheckSpecMatchesStatus(r, v.paths, HeaderInjected)
 	if found {
 		hmeta := meta.(*apidef.HeaderInjectionMeta)
 		for _, dKey := range hmeta.DeleteHeaders {

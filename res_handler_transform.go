@@ -64,8 +64,8 @@ func compressBuffer(in bytes.Buffer, encoding string) (out bytes.Buffer) {
 }
 
 func (h *ResponseTransformMiddleware) HandleResponse(rw http.ResponseWriter, res *http.Response, req *http.Request, ses *user.SessionState) error {
-	_, versionPaths, _, _ := h.Spec.Version(req)
-	found, meta := h.Spec.CheckSpecMatchesStatus(req, versionPaths, TransformedResponse)
+	v := h.Spec.Version(req)
+	found, meta := h.Spec.CheckSpecMatchesStatus(req, v.paths, TransformedResponse)
 
 	if !found {
 		return nil

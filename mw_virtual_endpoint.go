@@ -101,8 +101,8 @@ func (d *VirtualEndpoint) EnabledForSpec() bool {
 }
 
 func (d *VirtualEndpoint) ServeHTTPForCache(w http.ResponseWriter, r *http.Request) *http.Response {
-	_, versionPaths, _, _ := d.Spec.Version(r)
-	found, meta := d.Spec.CheckSpecMatchesStatus(r, versionPaths, VirtualPath)
+	v := d.Spec.Version(r)
+	found, meta := d.Spec.CheckSpecMatchesStatus(r, v.paths, VirtualPath)
 
 	if !found {
 		return nil

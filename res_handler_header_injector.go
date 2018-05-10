@@ -26,9 +26,8 @@ func (h *HeaderInjector) Init(c interface{}, spec *APISpec) error {
 
 func (h *HeaderInjector) HandleResponse(rw http.ResponseWriter, res *http.Response, req *http.Request, ses *user.SessionState) error {
 	// TODO: This should only target specific paths
-
-	_, versionPaths, _, _ := h.Spec.Version(req)
-	found, meta := h.Spec.CheckSpecMatchesStatus(req, versionPaths, HeaderInjectedResponse)
+	v := h.Spec.Version(req)
+	found, meta := h.Spec.CheckSpecMatchesStatus(req, v.paths, HeaderInjectedResponse)
 	if found {
 		hmeta := meta.(*apidef.HeaderInjectionMeta)
 		for _, dKey := range hmeta.DeleteHeaders {

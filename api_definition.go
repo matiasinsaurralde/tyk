@@ -1122,10 +1122,11 @@ func (a *APISpec) RequestValid2(r *http.Request) (result requestValidStruct) {
 // data and return a RequestStatus that describes the status of the
 // request
 func (a *APISpec) RequestValid(r *http.Request) (bool, RequestStatus, interface{}) {
-	versionMetaData, versionPaths, whiteListStatus, vstat := a.Version(r)
+	// versionMetaData, versionPaths, whiteListStatus, vstat := a.Version(r)
+	v := a.Version(r)
 	// Screwed up version info - fail and pass through
-	if vstat != StatusOk {
-		return false, vstat, nil
+	if v.status != StatusOk {
+		return false, v.status, nil
 	}
 
 	// Is the API version expired?
@@ -1133,13 +1134,13 @@ func (a *APISpec) RequestValid(r *http.Request) (bool, RequestStatus, interface{
 	// *apidef.EndpointMethodMeta and *time.Time. Probably need to
 	// redesign or entirely remove RequestValid. See discussion on
 	// https://github.com/TykTechnologies/tyk/pull/776
-	expired, expTime := a.VersionExpired(versionMetaData)
+	expired, expTime := a.VersionExpired(v.versioninfo)
 	if expired {
 		return false, VersionExpired, nil
 	}
 
 	// not expired, let's check path info
-	status, meta := a.URLAllowedAndIgnored(r, versionPaths, whiteListStatus)
+	status, meta := a.URLAllowedAndIgnored(r, v.paths, v.whitelisted)
 	switch status {
 	case EndPointNotAllowed:
 		return false, status, expTime
@@ -1226,11 +1227,17 @@ func (a *APISpec) Version2(r *http.Request) (result versionInfo) {
 	return result
 }
 
+type reqVersionInfo struct {
+	versioninfo *apidef.VersionInfo
+	paths       []URLSpec
+	whitelisted bool
+	status      RequestStatus
+}
+
 // Version attempts to extract the version data from a request, depending on where it is stored in the
 // request (currently only "header" is supported)
-func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool, RequestStatus) {
+func (a *APISpec) Version(r *http.Request) (output reqVersionInfo) {
 	var version apidef.VersionInfo
-
 	var cached bool
 	var matchAgain bool
 
@@ -1260,12 +1267,16 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 				ctxSetDefaultVersion(r)
 			}
 			if vname == "" && a.VersionData.DefaultVersion == "" {
-				return &version, nil, false, VersionNotFound
+				output.versioninfo = &version
+				output.status = VersionNotFound
+				return output
 			}
 			// Load Version Data - General
 			var ok bool
 			if version, ok = a.VersionData.Versions[vname]; !ok {
-				return &version, nil, false, VersionDoesNotExist
+				output.versioninfo = &version
+				output.status = VersionDoesNotExist
+				return output
 			}
 		}
 		// cache for the future
@@ -1285,7 +1296,11 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 		version.MatchingPaths = matchingPaths
 		version.CurrentURL = url
 		ctxSetVersionInfo(r, &version)
-		return &version, matchingPaths, version.Whitelisted, StatusOk
+		output.versioninfo = &version
+		output.paths = matchingPaths
+		output.whitelisted = version.Whitelisted
+		output.status = StatusOk
+		return output
 	}
 	if !cached {
 		// Load path data and whitelist data for version
@@ -1293,17 +1308,20 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 
 		if !rxOk {
 			log.Error("no RX Paths found for version ", version.Name)
-			return &version, nil, false, VersionDoesNotExist
+			output.versioninfo = &version
+			output.status = VersionDoesNotExist
+			return output
 		}
 
 		whiteListStatus, wlOk := a.WhiteListEnabled[version.Name]
 
 		if !wlOk {
 			log.Error("No whitelist data found")
-			return &version, nil, false, VersionWhiteListStatusNotFound
+			output.versioninfo = &version
+			output.status = VersionWhiteListStatusNotFound
+			return output
 		}
 		version.Whitelisted = whiteListStatus
-
 		matchingPaths = []URLSpec{}
 		for _, path := range rxPaths {
 			path.matches = path.Spec.MatchString(url)
@@ -1312,10 +1330,18 @@ func (a *APISpec) Version(r *http.Request) (*apidef.VersionInfo, []URLSpec, bool
 		version.MatchingPaths = matchingPaths
 		version.CurrentURL = url
 		ctxSetVersionInfo(r, &version)
-		return &version, matchingPaths, version.Whitelisted, StatusOk
+		output.versioninfo = &version
+		output.paths = matchingPaths
+		output.whitelisted = version.Whitelisted
+		output.status = StatusOk
+		return output
 	}
 	matchingPaths = version.MatchingPaths.([]URLSpec)
-	return &version, matchingPaths, version.Whitelisted, StatusOk
+	output.versioninfo = &version
+	output.paths = matchingPaths
+	output.whitelisted = version.Whitelisted
+	output.status = StatusOk
+	return output
 
 }
 

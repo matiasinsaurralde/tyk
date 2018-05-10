@@ -107,15 +107,15 @@ func (m *RedisCacheMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Req
 
 	var stat RequestStatus
 
-	_, versionPaths, _, _ := m.Spec.Version(r)
-	isVirtual, _ := m.Spec.CheckSpecMatchesStatus(r, versionPaths, VirtualPath)
+	v := m.Spec.Version(r)
+	isVirtual, _ := m.Spec.CheckSpecMatchesStatus(r, v.paths, VirtualPath)
 
 	// Lets see if we can throw a sledgehammer at this
 	if m.Spec.CacheOptions.CacheAllSafeRequests {
 		stat = StatusCached
 	} else {
 		// New request checker, more targeted, less likely to fail
-		found, _ := m.Spec.CheckSpecMatchesStatus(r, versionPaths, Cached)
+		found, _ := m.Spec.CheckSpecMatchesStatus(r, v.paths, Cached)
 		if found {
 			stat = StatusCached
 		}

@@ -63,13 +63,13 @@ func (t *RequestSizeLimitMiddleware) checkRequestLimit(r *http.Request, sizeLimi
 func (t *RequestSizeLimitMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Request, _ interface{}) (error, int) {
 	log.Debug("Request size limiter active")
 
-	vInfo, versionPaths, _, _ := t.Spec.Version(r)
+	v := t.Spec.Version(r)
 
-	log.Debug("Global limit is: ", vInfo.GlobalSizeLimit)
+	log.Debug("Global limit is: ", v.versioninfo.GlobalSizeLimit)
 	// Manage global headers first
-	if vInfo.GlobalSizeLimit > 0 {
+	if v.versioninfo.GlobalSizeLimit > 0 {
 		log.Debug("Checking global limit")
-		err, code := t.checkRequestLimit(r, vInfo.GlobalSizeLimit)
+		err, code := t.checkRequestLimit(r, v.versioninfo.GlobalSizeLimit)
 		// If not OK, block
 		if code != 200 {
 			return err, code
@@ -77,12 +77,12 @@ func (t *RequestSizeLimitMiddleware) ProcessRequest(w http.ResponseWriter, r *ht
 	}
 
 	// if there's no paths at all path check
-	if len(vInfo.ExtendedPaths.SizeLimit) == 0 {
+	if len(v.versioninfo.ExtendedPaths.SizeLimit) == 0 {
 		return nil, 200
 	}
 
 	// If there's a potential match, try to match
-	found, meta := t.Spec.CheckSpecMatchesStatus(r, versionPaths, RequestSizeLimit)
+	found, meta := t.Spec.CheckSpecMatchesStatus(r, v.paths, RequestSizeLimit)
 	if found {
 		log.Debug("Request size limit matched for this URL, checking...")
 		rmeta := meta.(*apidef.RequestSizeMeta)
