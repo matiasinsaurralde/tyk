@@ -496,6 +496,7 @@ func (p *ReverseProxy) WrappedServeHTTP(rw http.ResponseWriter, req *http.Reques
 	var roundTripper http.RoundTripper
 
 	p.TykAPISpec.Lock()
+	fmt.Printf("Proxying request for API %s, upstream is %s\n", p.TykAPISpec.APIID, p.TykAPISpec.Proxy.TargetURL)
 	if !outReqIsWebsocket { // check if it is a regular HTTP request
 		// create HTTP transport
 		createTransport := p.TykAPISpec.HTTPTransport == nil
