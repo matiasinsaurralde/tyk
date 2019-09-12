@@ -1,6 +1,3 @@
-// +build coprocess
-// +build python
-
 package python
 
 import (
@@ -15,6 +12,15 @@ import (
 	"github.com/TykTechnologies/tyk/gateway"
 	"github.com/TykTechnologies/tyk/test"
 	"github.com/TykTechnologies/tyk/user"
+)
+
+const (
+	defaultPythonVersion = "3.5"
+)
+
+var (
+	pythonVersion = defaultPythonVersion
+	pkgPath       = os.Getenv("PKG_PATH")
 )
 
 var pythonBundleWithAuthCheck = map[string]string{
@@ -133,6 +139,38 @@ def MyPreHook(request, session, metadata, spec):
 `,
 }
 
+var pythonBundleWithResponseHook = map[string]string{
+	"manifest.json": `
+		{
+		    "file_list": [
+		        "middleware.py"
+		    ],
+		    "custom_middleware": {
+		        "driver": "python",
+		        "response": [{
+		            "name": "MyResponseHook"
+		        }]
+		    }
+		}
+	`,
+	"middleware.py": `
+from tyk.decorators import *
+from gateway import TykGateway as tyk
+
+@Hook
+def MyResponseHook(request, response, session, metadata, spec):
+  response.raw_body = b'newbody'
+  return response
+
+`,
+}
+
+func init() {
+	if versionOverride := os.Getenv("PYTHON_VERSION"); versionOverride != "" {
+		pythonVersion = versionOverride
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(gateway.InitTestMain(context.Background(), m))
 }
@@ -140,13 +178,16 @@ func TestMain(m *testing.M) {
 func TestPythonBundles(t *testing.T) {
 	ts := gateway.StartTest(gateway.TestConfig{
 		CoprocessConfig: config.CoProcessConfig{
-			EnableCoProcess: true,
+			EnableCoProcess:  true,
+			PythonVersion:    pythonVersion,
+			PythonPathPrefix: pkgPath,
 		}})
 	defer ts.Close()
 
 	authCheckBundle := gateway.RegisterBundle("python_with_auth_check", pythonBundleWithAuthCheck)
 	postHookBundle := gateway.RegisterBundle("python_with_post_hook", pythonBundleWithPostHook)
 	preHookBundle := gateway.RegisterBundle("python_with_pre_hook", pythonBundleWithPreHook)
+	responseHookBundle := gateway.RegisterBundle("python_with_response_hook", pythonBundleWithResponseHook)
 
 	t.Run("Single-file bundle with authentication hook", func(t *testing.T) {
 		gateway.BuildAndLoadAPI(func(spec *gateway.APISpec) {
@@ -191,6 +232,32 @@ func TestPythonBundles(t *testing.T) {
 
 		ts.Run(t, []test.TestCase{
 			{Path: "/test-api-2/", Code: 200, Headers: auth},
+		}...)
+	})
+
+	t.Run("Single-file bundle with response hook", func(t *testing.T) {
+
+		keyID := gateway.CreateSession(func(s *user.SessionState) {
+			s.MetaData = map[string]interface{}{
+				"testkey":   map[string]interface{}{"nestedkey": "nestedvalue"},
+				"stringkey": "testvalue",
+			}
+		})
+
+		gateway.BuildAndLoadAPI(func(spec *gateway.APISpec) {
+			spec.Proxy.ListenPath = "/test-api-3/"
+			spec.UseKeylessAccess = false
+			spec.EnableCoProcessAuth = false
+			spec.CustomMiddlewareBundle = responseHookBundle
+			spec.VersionData.NotVersioned = true
+		})
+
+		time.Sleep(1 * time.Second)
+
+		auth := map[string]string{"Authorization": keyID}
+
+		ts.Run(t, []test.TestCase{
+			{Path: "/test-api-3/", Code: 200, Headers: auth, BodyMatch: "newbody"},
 		}...)
 	})
 

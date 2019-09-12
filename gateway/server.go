@@ -176,6 +176,10 @@ func setupGlobals(ctx context.Context) {
 	redisStore := storage.RedisCluster{KeyPrefix: "apikey-", HashKeys: config.Global().HashKeys}
 	FallbackKeySesionManager.Init(&redisStore)
 
+	versionStore := storage.RedisCluster{KeyPrefix: "version-check-"}
+	versionStore.Connect()
+	_ = versionStore.SetKey("gateway", VERSION, 0)
+
 	if config.Global().EnableAnalytics && analytics.Store == nil {
 		globalConf := config.Global()
 		globalConf.LoadIgnoredIPs()
@@ -211,11 +215,7 @@ func setupGlobals(ctx context.Context) {
 	templatesDir := filepath.Join(config.Global().TemplatePath, "error*")
 	templates = template.Must(template.ParseGlob(templatesDir))
 
-	if config.Global().CoProcessOptions.EnableCoProcess {
-		if err := CoProcessInit(); err != nil {
-			log.WithField("prefix", "coprocess").Error(err)
-		}
-	}
+	CoProcessInit()
 
 	// Get the notifier ready
 	mainLog.Debug("Notifier will not work in hybrid mode")
@@ -506,12 +506,13 @@ func addBatchEndpoint(spec *APISpec, muxer *mux.Router) {
 	muxer.HandleFunc(apiBatchPath, batchHandler.HandleBatchRequest)
 }
 
-func loadCustomMiddleware(spec *APISpec) ([]string, apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, apidef.MiddlewareDriver) {
+func loadCustomMiddleware(spec *APISpec) ([]string, apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, []apidef.MiddlewareDefinition, apidef.MiddlewareDriver) {
 	mwPaths := []string{}
 	var mwAuthCheckFunc apidef.MiddlewareDefinition
 	mwPreFuncs := []apidef.MiddlewareDefinition{}
 	mwPostFuncs := []apidef.MiddlewareDefinition{}
 	mwPostKeyAuthFuncs := []apidef.MiddlewareDefinition{}
+	mwResponseFuncs := []apidef.MiddlewareDefinition{}
 	mwDriver := apidef.OttoDriver
 
 	// Set AuthCheck hook
@@ -588,10 +589,16 @@ func loadCustomMiddleware(spec *APISpec) ([]string, apidef.MiddlewareDefinition,
 		mwPostKeyAuthFuncs = append(mwPostKeyAuthFuncs, mwObj)
 	}
 
-	return mwPaths, mwAuthCheckFunc, mwPreFuncs, mwPostFuncs, mwPostKeyAuthFuncs, mwDriver
+	// Load response hooks
+	for _, mw := range spec.CustomMiddleware.Response {
+		mwResponseFuncs = append(mwResponseFuncs, mw)
+	}
+
+	return mwPaths, mwAuthCheckFunc, mwPreFuncs, mwPostFuncs, mwPostKeyAuthFuncs, mwResponseFuncs, mwDriver
+
 }
 
-func createResponseMiddlewareChain(spec *APISpec) {
+func createResponseMiddlewareChain(spec *APISpec, responseFuncs []apidef.MiddlewareDefinition) {
 	// Create the response processors
 
 	responseChain := make([]TykResponseHandler, len(spec.ResponseProcessors))
@@ -607,6 +614,20 @@ func createResponseMiddlewareChain(spec *APISpec) {
 		mainLog.Debug("Loading Response processor: ", processorDetail.Name)
 		responseChain[i] = processor
 	}
+
+	for _, mw := range responseFuncs {
+		processor := responseProcessorByName("custom_mw_res_hook")
+		// TODO: perhaps error when plugin support is disabled?
+		if processor == nil {
+			mainLog.Error("Couldn't find custom middleware processor")
+			return
+		}
+		if err := processor.Init(mw, spec); err != nil {
+			mainLog.Debug("Failed to init processor: ", err)
+		}
+		responseChain = append(responseChain, processor)
+	}
+
 	spec.ResponseChain = responseChain
 }
 

@@ -92,7 +92,6 @@ func InitTestMain(ctx context.Context, m *testing.M, genConf ...func(globalConf 
 	globalConf.AllowInsecureConfigs = true
 	// Enable coprocess and bundle downloader:
 	globalConf.CoProcessOptions.EnableCoProcess = true
-	globalConf.CoProcessOptions.PythonPathPrefix = "../../"
 	globalConf.EnableBundleDownloader = true
 	globalConf.BundleBaseURL = testHttpBundles
 	globalConf.MiddlewarePath = testMiddlewarePath
@@ -387,13 +386,13 @@ func withAuth(r *http.Request) *http.Request {
 
 // Deprecated: Use Test.CreateSession instead.
 func CreateSession(sGen ...func(s *user.SessionState)) string {
-	key := generateToken("", "")
+	key := generateToken("default", "")
 	session := CreateStandardSession()
 	if len(sGen) > 0 {
 		sGen[0](session)
 	}
 	if session.Certificate != "" {
-		key = generateToken("", session.Certificate)
+		key = generateToken("default", session.Certificate)
 	}
 
 	FallbackKeySesionManager.UpdateSession(storage.HashKey(key), session, 60, config.Global().HashKeys)
@@ -413,11 +412,13 @@ func CreateStandardSession() *user.SessionState {
 	session.QuotaMax = -1
 	session.Tags = []string{}
 	session.MetaData = make(map[string]interface{})
+	session.OrgID = "default"
 	return session
 }
 
 func CreateStandardPolicy() *user.Policy {
 	return &user.Policy{
+		OrgID:            "default",
 		Rate:             1000.0,
 		Per:              1.0,
 		QuotaMax:         -1,
@@ -699,6 +700,7 @@ func StartTest(config ...TestConfig) *Test {
 
 const sampleAPI = `{
     "api_id": "test",
+	"org_id": "default",
     "use_keyless": true,
     "definition": {
         "location": "header",
