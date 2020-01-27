@@ -193,7 +193,7 @@ func (c *CoProcessor) ObjectPostProcess(object *coprocess.Object, r *http.Reques
 		values.Set(p, v)
 	}
 
-	r.URL, err = url.ParseRequestURI(object.Request.Url)
+	r.URL, err = url.Parse(object.Request.Url)
 	if err != nil {
 		return
 	}
